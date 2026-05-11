@@ -20,6 +20,8 @@ const MOLES = [
 const MAX_ACTIVE_MOLES = 3;
 const MOLE_STAY_MIN_MS = 1500;
 const MOLE_STAY_MAX_MS = 2400;
+const MENU_BGM_SRC = "asset/music/Lagu Menu Utama.mp3";
+const MENU_BGM_VOLUME = 0.32;
 
 const BAD_WORDS = [
   "anjing",
@@ -59,8 +61,11 @@ let supabase = null;
 let supabaseReadyPromise = null;
 let authSession = null;
 let authUser = null;
+let menuBgm = null;
+let menuBgmUnlocked = false;
 
 initSupabase();
+setupMenuBgmUnlock();
 connectSocket();
 render();
 
@@ -221,7 +226,12 @@ function handleServerMessage(message) {
 
 function render() {
   renderQueued = false;
-  app.className = state.view === VIEW.LOGIN ? "app-shell auth-shell" : "app-shell";
+  app.className = state.view === VIEW.LOGIN
+    ? "app-shell auth-shell"
+    : state.view === VIEW.SETTINGS
+      ? "app-shell settings-shell"
+      : "app-shell";
+  syncMenuBgm();
 
   if (state.view === VIEW.LOGIN) {
     app.innerHTML = loginTemplate();
@@ -603,37 +613,69 @@ function leaderboardTemplate() {
 
 function settingsTemplate() {
   return `
-    <main class="screen">
-      <header class="menu-topbar">
+    <main class="screen settings-page">
+      <header class="settings-hero">
         <div>
-          <span class="eyebrow"><span class="logo-mark"></span> Settings</span>
-          <h2>Profil</h2>
+          <span class="eyebrow settings-eyebrow"><i class="fa-solid fa-seedling"></i> Farm profile board</span>
+          <h2>Profil Kebun</h2>
+          <p class="muted">Atur identitas pemain, avatar, dan catatan singkat sebelum masuk ke arena.</p>
         </div>
-        <button class="button ghost" id="backMenu">Kembali</button>
+        <button class="button ghost settings-back" id="backMenu"><i class="fa-solid fa-arrow-left"></i> Kembali</button>
       </header>
 
       <section class="settings-grid">
-        <form class="panel padded form-stack" id="settingsForm">
-          <label class="field">
-            <span>Username</span>
-            <input id="settingsUsername" maxlength="20" value="${escapeAttribute(state.profile.username)}" required>
-          </label>
-          <label class="field">
-            <span>Foto Profil URL</span>
-            <input id="settingsAvatar" value="${escapeAttribute(state.profile.avatar)}" placeholder="https://...">
-          </label>
-          <label class="field">
-            <span>Bio</span>
-            <textarea id="settingsBio" maxlength="120" placeholder="Tulis bio singkat">${escapeHtml(state.profile.bio)}</textarea>
-          </label>
-          <button class="button">Simpan Profil</button>
-        </form>
-        <aside class="panel padded stack">
-          ${profileChip()}
-          <button class="button secondary" id="contactCs">Hubungi CS</button>
-          <button class="button danger" id="logout">Logout</button>
-          <p class="muted">Guest tidak menyimpan skor setelah permainan selesai.</p>
+        <aside class="settings-card settings-profile-card">
+          <div class="settings-avatar-large">
+            ${largeAvatarTemplate(state.profile)}
+          </div>
+          <span class="settings-status-pill"><i class="fa-solid ${state.profile.guest ? "fa-user" : "fa-leaf"}"></i> ${state.profile.guest ? "Guest Farmer" : "Farm Player"}</span>
+          <h3>${escapeHtml(state.profile.username || "Guest")}</h3>
+          <p class="settings-bio-preview">${escapeHtml(state.profile.bio || "Belum ada bio. Tulis pesan singkat agar profil kebunmu terasa hidup.")}</p>
+          <div class="settings-harvest-row">
+            <span><i class="fa-solid fa-trophy"></i><strong>Score</strong><small>${state.profile.guest ? "Tidak disimpan" : "Tersimpan"}</small></span>
+            <span><i class="fa-solid fa-image"></i><strong>Avatar</strong><small>${state.profile.avatar ? "Aktif" : "Default"}</small></span>
+          </div>
         </aside>
+
+        <div class="settings-main-column">
+          <form class="settings-card settings-form-card form-stack" id="settingsForm">
+            <div class="settings-card-heading">
+              <span><i class="fa-solid fa-pen-to-square"></i></span>
+              <div>
+                <h3>Edit Profil</h3>
+                <p class="muted">Perubahan akan langsung dipakai di lobby dan room.</p>
+              </div>
+            </div>
+            <label class="field">
+              <span><i class="fa-solid fa-user"></i> Username</span>
+              <input id="settingsUsername" maxlength="20" value="${escapeAttribute(state.profile.username)}" required>
+            </label>
+            <label class="field">
+              <span><i class="fa-solid fa-image"></i> Foto Profil URL</span>
+              <input id="settingsAvatar" value="${escapeAttribute(state.profile.avatar)}" placeholder="https://...">
+            </label>
+            <label class="field">
+              <span><i class="fa-solid fa-feather"></i> Bio</span>
+              <textarea id="settingsBio" maxlength="120" placeholder="Tulis bio singkat">${escapeHtml(state.profile.bio)}</textarea>
+            </label>
+            <button class="button settings-save"><i class="fa-solid fa-floppy-disk"></i> Simpan Profil</button>
+          </form>
+
+          <aside class="settings-card settings-action-card">
+            <div class="settings-card-heading">
+              <span><i class="fa-solid fa-toolbox"></i></span>
+              <div>
+                <h3>Aksi Akun</h3>
+                <p class="muted">Bantuan, logout, dan catatan status pemain.</p>
+              </div>
+            </div>
+            <div class="settings-action-row">
+              <button class="button secondary" id="contactCs"><i class="fa-solid fa-headset"></i> Hubungi CS</button>
+              <button class="button danger" id="logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
+            </div>
+            <p class="settings-note"><i class="fa-solid fa-circle-info"></i> Guest tidak menyimpan score setelah permainan selesai.</p>
+          </aside>
+        </div>
       </section>
     </main>
   `;
@@ -666,6 +708,15 @@ function avatarTemplate(profile) {
 
   const initial = (profile.username || "P").trim().charAt(0).toUpperCase() || "P";
   return `<span class="avatar-fallback">${escapeHtml(initial)}</span>`;
+}
+
+function largeAvatarTemplate(profile) {
+  if (profile.avatar) {
+    return `<span class="large-avatar"><img src="${escapeAttribute(profile.avatar)}" alt=""></span>`;
+  }
+
+  const initial = (profile.username || "P").trim().charAt(0).toUpperCase() || "P";
+  return `<span class="large-avatar fallback">${escapeHtml(initial)}</span>`;
 }
 
 function scoreRows(players) {
@@ -1034,6 +1085,7 @@ function startSolo() {
 
 function openGame(mode) {
   stopGameplay();
+  pauseMenuBgm();
   state.mode = mode;
   state.gameplay = {
     holes: Array.from({ length: 9 }, () => null),
@@ -1544,6 +1596,56 @@ function goMenu() {
   stopGameplay();
   state.view = VIEW.MENU;
   render();
+}
+
+function setupMenuBgmUnlock() {
+  const unlock = () => {
+    menuBgmUnlocked = true;
+    syncMenuBgm();
+    window.removeEventListener("pointerdown", unlock);
+    window.removeEventListener("keydown", unlock);
+    window.removeEventListener("touchstart", unlock);
+  };
+
+  window.addEventListener("pointerdown", unlock, { once: true });
+  window.addEventListener("keydown", unlock, { once: true });
+  window.addEventListener("touchstart", unlock, { once: true });
+}
+
+function syncMenuBgm() {
+  if (state.view === VIEW.GAME) {
+    pauseMenuBgm();
+    return;
+  }
+
+  playMenuBgm();
+}
+
+function getMenuBgm() {
+  if (!menuBgm) {
+    menuBgm = new Audio(MENU_BGM_SRC);
+    menuBgm.loop = true;
+    menuBgm.volume = MENU_BGM_VOLUME;
+    menuBgm.preload = "auto";
+  }
+
+  return menuBgm;
+}
+
+function playMenuBgm() {
+  if (!menuBgmUnlocked || state.view === VIEW.GAME) return;
+
+  const bgm = getMenuBgm();
+  if (!bgm.paused) return;
+
+  bgm.play().catch((error) => {
+    console.warn("Menu BGM play blocked:", error);
+  });
+}
+
+function pauseMenuBgm() {
+  if (!menuBgm || menuBgm.paused) return;
+  menuBgm.pause();
 }
 
 function sendProfile() {

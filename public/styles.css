@@ -851,6 +851,308 @@ textarea:focus {
   gap: 18px;
 }
 
+.settings-shell {
+  position: relative;
+  overflow: hidden;
+  font-family: "Nunito", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at 12% 12%, rgba(255, 245, 181, 0.88) 0 4rem, transparent 4.2rem),
+    radial-gradient(circle at 82% 16%, rgba(255, 255, 255, 0.62) 0 3.7rem, transparent 3.9rem),
+    linear-gradient(180deg, #87d8f0 0%, #beeef5 34%, #95d86f 35%, #58b466 72%, #31884b 100%);
+}
+
+.settings-shell::before {
+  content: "";
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  bottom: -8%;
+  height: 30%;
+  background:
+    repeating-linear-gradient(104deg, rgba(255, 229, 128, 0.16) 0 8px, transparent 8px 26px),
+    linear-gradient(180deg, rgba(96, 179, 82, 0.82), rgba(43, 129, 62, 0.9));
+  transform: rotate(-1deg);
+}
+
+.settings-shell .screen {
+  position: relative;
+  z-index: 1;
+}
+
+.settings-page {
+  width: min(1160px, 100%);
+}
+
+.settings-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.settings-eyebrow {
+  color: #5a7d24;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.42);
+}
+
+.settings-eyebrow i {
+  color: #3d9a40;
+}
+
+.settings-hero h2 {
+  margin-bottom: 6px;
+  color: #65421f;
+  font-family: "Baloo 2", "Nunito", ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(2.2rem, 5vw, 4rem);
+  line-height: 0.95;
+  text-shadow: 0 4px 0 rgba(255, 242, 183, 0.56);
+}
+
+.settings-hero .muted {
+  max-width: 620px;
+  color: #4e572b;
+  font-weight: 800;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.44);
+}
+
+.button.ghost.settings-back {
+  color: #3f2a18;
+  background: linear-gradient(180deg, #fff0bd, #e0ad62);
+  border: 2px solid #6d4727;
+  box-shadow: inset 0 -4px 0 rgba(98, 72, 20, 0.22), 0 6px 0 rgba(80, 54, 27, 0.22);
+}
+
+.button.ghost.settings-back:hover {
+  background: linear-gradient(180deg, #fff6cf, #ecc06f);
+}
+
+.settings-page .settings-grid {
+  grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+}
+
+.settings-main-column {
+  display: grid;
+  gap: 18px;
+}
+
+.settings-card {
+  position: relative;
+  padding: 22px;
+  border: 3px solid #6d4727;
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08), transparent 18% 82%, rgba(72, 36, 14, 0.14)),
+    linear-gradient(180deg, #7b4c28, #5b341c);
+  box-shadow: 0 14px 0 rgba(52, 33, 19, 0.28), 0 22px 46px rgba(63, 101, 43, 0.26);
+}
+
+.settings-card::before {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  z-index: 0;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #fff4c8, #e7b875);
+  box-shadow: inset 0 0 0 2px rgba(91, 52, 28, 0.16);
+}
+
+.settings-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.settings-profile-card {
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.settings-avatar-large {
+  width: 148px;
+  height: 148px;
+  display: grid;
+  place-items: center;
+  margin: 4px auto 14px;
+  border: 6px solid #704829;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 25%, rgba(255, 255, 255, 0.42), transparent 28%),
+    linear-gradient(135deg, #9ed56b, #f3c96e);
+  box-shadow: inset 0 -10px 0 rgba(80, 54, 27, 0.16), 0 10px 0 rgba(83, 52, 28, 0.22);
+  overflow: hidden;
+}
+
+.large-avatar {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: #3f2a18;
+  font-family: "Baloo 2", "Nunito", ui-sans-serif, system-ui, sans-serif;
+  font-size: 4.8rem;
+  font-weight: 900;
+}
+
+.large-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.large-avatar.fallback {
+  background: transparent;
+}
+
+.settings-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 31px;
+  margin-bottom: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  color: #263416;
+  background: #9ed56b;
+  font-weight: 1000;
+  box-shadow: inset 0 -3px 0 rgba(62, 93, 34, 0.22);
+}
+
+.settings-profile-card h3,
+.settings-card-heading h3 {
+  margin-bottom: 6px;
+  color: #432915;
+  font-family: "Baloo 2", "Nunito", ui-sans-serif, system-ui, sans-serif;
+}
+
+.settings-profile-card h3 {
+  font-size: 2rem;
+}
+
+.settings-bio-preview {
+  min-height: 68px;
+  color: #6d5132;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.settings-harvest-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: auto;
+}
+
+.settings-harvest-row span {
+  min-height: 86px;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  padding: 10px;
+  border: 2px solid rgba(100, 65, 32, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 249, 224, 0.64);
+}
+
+.settings-harvest-row i {
+  color: #6fa33d;
+  font-size: 1.25rem;
+}
+
+.settings-harvest-row strong {
+  color: #432915;
+}
+
+.settings-harvest-row small {
+  color: #7a5a39;
+  font-weight: 900;
+}
+
+.settings-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.settings-card-heading > span {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  color: #263416;
+  background: #9ed56b;
+  box-shadow: inset 0 -4px 0 rgba(62, 93, 34, 0.22);
+}
+
+.settings-card-heading .muted {
+  color: #6d5132;
+}
+
+.settings-page .field span {
+  color: #6d5132;
+  font-weight: 1000;
+}
+
+.settings-page .field span i {
+  width: 18px;
+  color: #6fa33d;
+}
+
+.settings-page input,
+.settings-page textarea {
+  border-color: rgba(101, 65, 32, 0.35);
+  background: #fff7dc;
+  color: #3a2817;
+  font-family: "Nunito", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+}
+
+.settings-page input:focus,
+.settings-page textarea:focus {
+  border-color: #5a9c43;
+  box-shadow: 0 0 0 4px rgba(90, 156, 67, 0.18);
+}
+
+.settings-page .button {
+  font-family: "Baloo 2", "Nunito", ui-sans-serif, system-ui, sans-serif;
+  box-shadow: inset 0 -4px 0 rgba(98, 72, 20, 0.24);
+}
+
+.settings-save {
+  width: max-content;
+}
+
+.settings-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settings-note {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin: 14px 0 0;
+  padding: 12px;
+  border-radius: 8px;
+  color: #5d452c;
+  background: rgba(255, 249, 224, 0.64);
+  font-weight: 800;
+}
+
+.settings-note i {
+  color: #6fa33d;
+  margin-top: 3px;
+}
+
 .padded {
   padding: 20px;
 }
@@ -1323,6 +1625,19 @@ textarea:focus {
     min-height: auto;
   }
 
+  .settings-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .settings-page .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-profile-card {
+    min-height: auto;
+  }
+
   .auth-field-preview {
     min-height: 240px;
   }
@@ -1371,6 +1686,32 @@ textarea:focus {
 
   .farm-auth-card {
     padding-inline: 18px;
+  }
+
+  .settings-page {
+    width: 100%;
+  }
+
+  .settings-card {
+    padding: 18px;
+  }
+
+  .settings-avatar-large {
+    width: 118px;
+    height: 118px;
+  }
+
+  .large-avatar {
+    font-size: 3.8rem;
+  }
+
+  .settings-harvest-row {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-action-row .button,
+  .settings-save {
+    width: 100%;
   }
 
   .auth-field-preview {
