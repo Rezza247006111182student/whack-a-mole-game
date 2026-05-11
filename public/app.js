@@ -807,8 +807,18 @@ function setupHammerCursor() {
 
   const moveHammer = (event) => {
     const rect = arena.getBoundingClientRect();
-    hammer.style.left = `${event.clientX - rect.left}px`;
-    hammer.style.top = `${event.clientY - rect.top}px`;
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    if (state.gameplay && Date.now() < state.gameplay.slowCursorUntil) {
+      // Apply "slow" effect via transition and a slight offset or just the transition
+      hammer.style.transition = "left 0.15s linear, top 0.15s linear";
+    } else {
+      hammer.style.transition = "none";
+    }
+
+    hammer.style.left = `${x}px`;
+    hammer.style.top = `${y}px`;
   };
 
   arena.addEventListener("pointerenter", (event) => {
@@ -1021,11 +1031,88 @@ function openGame(mode) {
     nextSpawn: null,
     timer: null,
     botTimer: null,
-    renderTimer: null
+    renderTimer: null,
+    // Special Effects State
+    redMoleTimeout: null,
+    totalBonusTime: 0,
+    doubleScoreUntil: 0,
+    slowCursorUntil: 0,
+    goldHits: [],
+    freezeHits: [],
+    audio: null
   };
   state.view = VIEW.GAME;
   render();
   startGameplayLoop();
+}
+
+function triggerFlashbang() {
+  const overlay = document.createElement("div");
+  overlay.className = "flashbang-overlay";
+  app.appendChild(overlay);
+  
+  showToast("FLASHBANG! Mata silau!");
+
+  // Play Flashbang Sound
+  const flashSfx = new Audio("asset/music/Flashbang Sound Effect - FX Studio Sounds.mp3");
+  flashSfx.volume = 1.0;
+  flashSfx.play().catch(err => console.warn("Audio play blocked by browser:", err));
+  
+  setTimeout(() => {
+    overlay.remove();
+  }, 2500);
+}
+
+function triggerSnowfall() {
+  const arena = document.querySelector("#arena");
+  if (!arena) return;
+
+  const snowContainer = document.createElement("div");
+  snowContainer.className = "snow-container";
+  arena.appendChild(snowContainer);
+
+  for (let i = 0; i < 100; i++) {
+    const flake = document.createElement("div");
+    flake.className = "snowflake";
+    flake.style.left = `${Math.random() * 100}%`;
+    flake.style.width = `${Math.random() * 7 + 5}px`;
+    flake.style.height = flake.style.width;
+    flake.style.opacity = Math.random() * 0.7 + 0.3;
+    flake.style.animationDelay = `${Math.random() * 5}s`;
+    flake.style.animationDuration = `${Math.random() * 3 + 4}s`;
+    snowContainer.appendChild(flake);
+  }
+
+  showToast("SNOWFALL! Dingin sekali!");
+
+  // Play Music
+  if (state.gameplay) {
+    if (state.gameplay.audio) {
+      state.gameplay.audio.pause();
+    }
+    state.gameplay.audio = new Audio("asset/music/Frozen - Let It Go (Piano Version) - Patrik Pietschmann.mp3");
+    state.gameplay.audio.volume = 0.5;
+    state.gameplay.audio.currentTime = 188; // Start at 3:08
+    state.gameplay.audio.play().catch(err => console.warn("Audio play blocked by browser:", err));
+  }
+
+  setTimeout(() => {
+    snowContainer.remove();
+    if (state.gameplay?.audio) {
+      // Fade out effect
+      const fadeInterval = setInterval(() => {
+        if (state.gameplay?.audio && state.gameplay.audio.volume > 0.05) {
+          state.gameplay.audio.volume -= 0.05;
+        } else {
+          clearInterval(fadeInterval);
+          if (state.gameplay?.audio) {
+            state.gameplay.audio.pause();
+            state.gameplay.audio = null;
+          }
+        }
+      }, 100);
+    }
+  }, 10000);
 }
 
 function startGameplayLoop() {
@@ -1061,6 +1148,13 @@ function stopGameplay() {
   clearInterval(state.gameplay.botTimer);
   clearInterval(state.gameplay.renderTimer);
   clearTimeout(state.gameplay.timer);
+  if (state.gameplay.redMoleTimeout) {
+    clearTimeout(state.gameplay.redMoleTimeout);
+  }
+  if (state.gameplay.audio) {
+    state.gameplay.audio.pause();
+    state.gameplay.audio = null;
+  }
   state.gameplay = null;
 }
 
@@ -1208,11 +1302,89 @@ function hitHole(event) {
   const mole = state.gameplay?.holes[index];
   if (!mole || mole.phase !== "active") return;
 
-  addLocalScore(mole.points, mole.effect);
-  popScore(hole, mole.points);
+  const points = applyMoleEffect(mole.type, mole.points);
+  popScore(hole, points);
   dismissMole(index, mole.id, "hit");
   setTimeout(() => spawnMoles(1, [index]), 150);
   updateGameHud();
+}
+
+function applyMoleEffect(type, basePoints) {
+  if (!state.gameplay) return basePoints;
+
+  let points = basePoints;
+
+  // 2. Gold Mole Buff: Double score
+  if (Date.now() < state.gameplay.doubleScoreUntil) {
+    points *= 2;
+  }
+
+  if (type === "gold") {
+    state.gameplay.doubleScoreUntil = Date.now() + 5000;
+    showToast("DOUBLE SCORE! (5 detik)");
+
+    // Flashbang tracking
+    state.gameplay.goldHits.push(Date.now());
+    // Filter hits within last 5 seconds
+    state.gameplay.goldHits = state.gameplay.goldHits.filter(t => Date.now() - t < 5000);
+    
+    if (state.gameplay.goldHits.length >= 3) {
+      triggerFlashbang();
+      state.gameplay.goldHits = [];
+    }
+  }
+
+  // 3. Freeze Mole Buff: Slow cursor
+  if (type === "freeze") {
+    state.gameplay.slowCursorUntil = Date.now() + 2000;
+    showToast("CURSOR SLOWED! (2 detik)");
+
+    // Snowfall tracking
+    state.gameplay.freezeHits.push(Date.now());
+    // Filter hits within last 10 seconds
+    state.gameplay.freezeHits = state.gameplay.freezeHits.filter(t => Date.now() - t < 10000);
+    
+    if (state.gameplay.freezeHits.length >= 3) {
+      triggerSnowfall();
+      state.gameplay.freezeHits = [];
+    }
+  }
+
+  // 1. Red Mole (Bad) Effect
+  if (type === "bad") {
+    if (state.gameplay.redMoleTimeout) {
+      // Hit 2nd red mole within 3s
+      clearTimeout(state.gameplay.redMoleTimeout);
+      state.gameplay.redMoleTimeout = null;
+
+      if (state.gameplay.totalBonusTime < 30000) {
+        state.gameplay.endsAt += 10000;
+        state.gameplay.totalBonusTime += 10000;
+        showToast("COMBO MERAH! +10 detik");
+        
+        // Update game timer
+        clearTimeout(state.gameplay.timer);
+        state.gameplay.timer = setTimeout(finishLocalGame, Math.max(0, state.gameplay.endsAt - Date.now()));
+      } else {
+        showToast("Jatah buff dari tikus merah sudah habis");
+      }
+    } else {
+      // Hit 1st red mole
+      showToast("WASPADA! Pukul lagi dalam 3 detik atau -10 detik");
+      state.gameplay.redMoleTimeout = setTimeout(() => {
+        state.gameplay.redMoleTimeout = null;
+        state.gameplay.endsAt -= 10000;
+        showToast("WAKTU BERKURANG -10 detik");
+        
+        // Update game timer
+        clearTimeout(state.gameplay.timer);
+        state.gameplay.timer = setTimeout(finishLocalGame, Math.max(0, state.gameplay.endsAt - Date.now()));
+      }, 3000);
+    }
+  }
+
+  addLocalScore(points, MOLES.find(m => m.type === type)?.effect || "Normal");
+  return points;
 }
 
 function addLocalScore(points, effect) {
@@ -1254,7 +1426,29 @@ function updateGameHud() {
 
   if (timer) timer.textContent = `${remaining}s`;
   if (score) score.textContent = me?.score || 0;
-  if (effect) effect.textContent = me?.effect || "Normal";
+
+  // Active Effects Indicators
+  let activeEffects = [];
+  const now = Date.now();
+
+  if (state.gameplay.doubleScoreUntil > now) {
+    const s = Math.ceil((state.gameplay.doubleScoreUntil - now) / 1000);
+    activeEffects.push(`<span class="tag warn"><i class="fa-solid fa-coins" style="margin-right: 4px;"></i> ${s}s</span>`);
+  }
+
+  if (state.gameplay.slowCursorUntil > now) {
+    const s = Math.ceil((state.gameplay.slowCursorUntil - now) / 1000);
+    activeEffects.push(`<span class="tag danger"><i class="fa-solid fa-snowflake" style="margin-right: 4px;"></i> ${s}s</span>`);
+  }
+
+  if (state.gameplay.redMoleTimeout) {
+    activeEffects.push(`<span class="tag"><i class="fa-solid fa-fire" style="margin-right: 4px;"></i> COMBO!</span>`);
+  }
+
+  if (effect) {
+    effect.innerHTML = activeEffects.length > 0 ? activeEffects.join(" ") : "Normal";
+  }
+
   if (scoreList) scoreList.innerHTML = scoreRows(players);
   if (effectList) {
     effectList.innerHTML = players.map((player) => `
