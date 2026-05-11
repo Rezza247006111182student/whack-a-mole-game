@@ -141,6 +141,16 @@ function handleServerMessage(message) {
 
   if (type === "game:ended") {
     state.leaderboard = payload.leaderboard;
+    const myRank = state.leaderboard.findIndex(p => p.id === state.playerId) + 1;
+    
+    if (myRank > 0 && myRank <= 3) {
+      const victorySfx = new Audio("asset/music/Super Mario Bros. Music - Level Complete - BlittleMcNilsen.mp3");
+      victorySfx.play().catch(err => console.warn("Audio play blocked:", err));
+    } else if (myRank >= 4) {
+      const gameOverSfx = new Audio("asset/music/SUPER MARIO - game over - sound effect - Super Mario Broz..mp3");
+      gameOverSfx.play().catch(err => console.warn("Audio play blocked:", err));
+    }
+    
     stopGameplay();
     state.view = VIEW.LEADERBOARD;
     render();
@@ -805,8 +815,16 @@ function openGame(mode) {
     slowCursorUntil: 0,
     goldHits: [],
     freezeHits: [],
-    audio: null
+    audio: null,
+    bgm: null
   };
+
+  // Play Gameplay BGM
+  state.gameplay.bgm = new Audio("asset/music/Sonic The Hedgehog OST - Marble Zone - Hanternos.mp3");
+  state.gameplay.bgm.loop = true;
+  state.gameplay.bgm.volume = 0.4;
+  state.gameplay.bgm.play().catch(err => console.warn("BGM play blocked:", err));
+
   state.view = VIEW.GAME;
   render();
   startGameplayLoop();
@@ -851,11 +869,17 @@ function triggerSnowfall() {
 
   showToast("SNOWFALL! Dingin sekali!");
 
-  // Play Music
+  // Play Music & Handle BGM Overlap
   if (state.gameplay) {
     if (state.gameplay.audio) {
       state.gameplay.audio.pause();
     }
+    
+    // Pause main BGM during snowfall
+    if (state.gameplay.bgm) {
+      state.gameplay.bgm.pause();
+    }
+
     state.gameplay.audio = new Audio("asset/music/Frozen - Let It Go (Piano Version) - Patrik Pietschmann.mp3");
     state.gameplay.audio.volume = 0.5;
     state.gameplay.audio.currentTime = 188; // Start at 3:08
@@ -874,6 +898,11 @@ function triggerSnowfall() {
           if (state.gameplay?.audio) {
             state.gameplay.audio.pause();
             state.gameplay.audio = null;
+            
+            // Resume BGM after snowfall if game is still active
+            if (state.gameplay && state.gameplay.bgm) {
+              state.gameplay.bgm.play().catch(err => console.warn("BGM resume blocked:", err));
+            }
           }
         }
       }, 100);
@@ -917,16 +946,35 @@ function stopGameplay() {
   if (state.gameplay.redMoleTimeout) {
     clearTimeout(state.gameplay.redMoleTimeout);
   }
+  
+  // Stop Effect Audio
   if (state.gameplay.audio) {
     state.gameplay.audio.pause();
     state.gameplay.audio = null;
   }
+  
+  // Stop BGM
+  if (state.gameplay.bgm) {
+    state.gameplay.bgm.pause();
+    state.gameplay.bgm = null;
+  }
+
   state.gameplay = null;
 }
 
 function finishLocalGame() {
   if (state.mode === "solo") {
     state.leaderboard = [...state.soloPlayers].sort((a, b) => b.score - a.score);
+    
+    const myRank = state.leaderboard.findIndex(p => p.id === (state.playerId || "solo-player")) + 1;
+    if (myRank > 0 && myRank <= 3) {
+      const victorySfx = new Audio("asset/music/Super Mario Bros. Music - Level Complete - BlittleMcNilsen.mp3");
+      victorySfx.play().catch(err => console.warn("Audio play blocked:", err));
+    } else if (myRank >= 4) {
+      const gameOverSfx = new Audio("asset/music/SUPER MARIO - game over - sound effect - Super Mario Broz..mp3");
+      gameOverSfx.play().catch(err => console.warn("Audio play blocked:", err));
+    }
+
     stopGameplay();
     state.view = VIEW.LEADERBOARD;
     render();
