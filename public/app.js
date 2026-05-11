@@ -32,6 +32,8 @@ const BAD_WORDS = [
   "goblok"
 ];
 
+const appConfig = window.APP_CONFIG || {};
+
 let state = {
   view: VIEW.LOGIN,
   connected: false,
@@ -53,9 +55,63 @@ let state = {
 
 let socket = null;
 let renderQueued = false;
+let supabase = null;
+let supabaseReadyPromise = null;
+let authSession = null;
+let authUser = null;
 
+initSupabase();
 connectSocket();
 render();
+
+async function initSupabase() {
+  if (supabaseReadyPromise) return supabaseReadyPromise;
+
+  supabaseReadyPromise = setupSupabase();
+  return supabaseReadyPromise;
+}
+
+async function setupSupabase() {
+  if (!hasSupabaseConfig()) return null;
+
+  try {
+    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+    supabase = createClient(appConfig.supabaseUrl, appConfig.supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        persistSession: true
+      }
+    });
+
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      console.warn("Supabase session error:", error.message);
+    }
+
+    if (data?.session) {
+      await applySupabaseSession(data.session);
+    }
+
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        applySupabaseSession(session);
+      }
+
+      if (event === "SIGNED_OUT") {
+        authSession = null;
+        authUser = null;
+      }
+    });
+
+    render();
+    return supabase;
+  } catch (error) {
+    console.error("Supabase gagal dimuat:", error);
+    showToast("Supabase belum bisa dimuat. Cek koneksi internet atau env.");
+    return null;
+  }
+}
 
 function connectSocket() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -155,7 +211,7 @@ function handleServerMessage(message) {
 
 function render() {
   renderQueued = false;
-  app.className = "app-shell";
+  app.className = state.view === VIEW.LOGIN ? "app-shell auth-shell" : "app-shell";
 
   if (state.view === VIEW.LOGIN) {
     app.innerHTML = loginTemplate();
@@ -208,39 +264,103 @@ function scheduleRender() {
 
 function loginTemplate() {
   return `
-    <main class="screen login-layout">
-      <section class="brand-scene">
-        <div class="brand-title">
-          <span class="eyebrow"><span class="logo-mark"></span> Real-time whack arena</span>
-          <h1>Whack Rush Arena</h1>
-          <p class="lead">Masuk, pilih mode, hantam mole yang muncul, dan kejar posisi teratas di leaderboard. Multiplayer bisa dites dari beberapa tab browser.</p>
+    <main class="screen login-layout farm-auth">
+      <section class="brand-scene farm-hero">
+        <div class="brand-title farm-copy">
+          <span class="eyebrow farm-eyebrow"><i class="fa-solid fa-seedling"></i> Farm village arcade</span>
+          <h1>Whack Rush Farm</h1>
+          <p class="lead">Masuk ke kebun, pilih mode bermain, lalu kejar skor tertinggi di arena yang terasa hangat seperti game pertanian klasik.</p>
         </div>
-        <div class="hud" aria-hidden="true">
-          <div class="stat"><small>Mode</small><strong>Solo</strong></div>
-          <div class="stat"><small>Room</small><strong>Live</strong></div>
-          <div class="stat"><small>Timer</small><strong>60s</strong></div>
+
+        <div class="auth-field-preview" aria-hidden="true">
+          <span class="auth-game-preview">
+            ${authPreviewHole("mole-one")}
+            ${authPreviewHole("mole-two")}
+            ${authPreviewHole("mole-three")}
+          </span>
+        </div>
+
+        <div class="farm-feature-strip" aria-label="Fitur utama">
+          <div class="farm-feature"><i class="fa-solid fa-people-group"></i><small>Mode</small><strong>Solo & Room</strong></div>
+          <div class="farm-feature"><i class="fa-solid fa-clock"></i><small>Musim</small><strong>60 Detik</strong></div>
+          <div class="farm-feature"><i class="fa-solid fa-trophy"></i><small>Panen</small><strong>Leaderboard</strong></div>
         </div>
       </section>
 
-      <section class="panel login-panel">
-        <h2>Login</h2>
-        <p class="muted">Pakai akun dummy atau masuk sebagai guest.</p>
-        <form class="form-stack" id="loginForm">
-          <label class="field">
-            <span>Username</span>
-            <input id="username" name="username" maxlength="20" autocomplete="username" placeholder="contoh: MoleHunter" required>
-          </label>
-          <label class="field">
-            <span>Password</span>
-            <input id="password" name="password" type="password" autocomplete="current-password" placeholder="boleh dikosongkan untuk prototype">
-          </label>
-          <div class="actions">
-            <button class="button" type="submit">Masuk</button>
-            <button class="button secondary" id="guestBtn" type="button">Guest</button>
-          </div>
-        </form>
+      <section class="panel login-panel farm-auth-card" id="authCard">
+        <div class="farm-card-topper" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="auth-mode-board" role="tablist" aria-label="Pilih login atau register">
+          <button class="auth-tab active" id="loginTab" type="button">
+            <i class="fa-solid fa-right-to-bracket"></i>
+            <span>Login</span>
+          </button>
+          <button class="auth-tab" id="registerTab" type="button">
+            <i class="fa-solid fa-user-plus"></i>
+            <span>Register</span>
+          </button>
+        </div>
+
+        <div class="auth-heading">
+          <h2 id="authTitle">Selamat Datang</h2>
+          <p class="muted" id="authSubtitle">Masuk sebagai pemain kebun atau lanjut sebagai guest.</p>
+        </div>
+
+        <div class="auth-panel-stage">
+          <form class="form-stack auth-form active" id="loginForm">
+            <label class="field">
+              <span><i class="fa-solid fa-user"></i> Username</span>
+              <input id="username" name="username" maxlength="20" autocomplete="username" placeholder="contoh: FarmerMole" required>
+            </label>
+            <label class="field">
+              <span><i class="fa-solid fa-lock"></i> Password</span>
+              <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Prototype: boleh dikosongkan">
+            </label>
+            <div class="actions">
+              <button class="button" type="submit"><i class="fa-solid fa-door-open"></i> Masuk</button>
+              <button class="button secondary" id="guestBtn" type="button"><i class="fa-solid fa-user"></i> Guest</button>
+            </div>
+            <div class="auth-divider"><span>atau</span></div>
+            <button class="button google" id="googleLoginBtn" type="button" ${hasSupabaseConfig() ? "" : "disabled"}>
+              <i class="fa-brands fa-google"></i>
+              Login dengan Google
+            </button>
+            <p class="muted">${hasSupabaseConfig() ? "Google OAuth memakai Supabase Auth." : "Supabase env belum lengkap."}</p>
+          </form>
+
+          <form class="form-stack auth-form" id="registerForm">
+            <label class="field">
+              <span><i class="fa-solid fa-seedling"></i> Username Petani</span>
+              <input id="registerUsername" maxlength="20" autocomplete="username" placeholder="contoh: GreenFarmer" required>
+            </label>
+            <label class="field">
+              <span><i class="fa-solid fa-envelope"></i> Email</span>
+              <input id="registerEmail" type="email" autocomplete="email" placeholder="nama@email.com">
+            </label>
+            <label class="field">
+              <span><i class="fa-solid fa-key"></i> Password</span>
+              <input id="registerPassword" type="password" autocomplete="new-password" placeholder="Minimal 6 karakter">
+            </label>
+            <button class="button" type="submit"><i class="fa-solid fa-seedling"></i> Buat Akun</button>
+            <p class="muted">Untuk tahap UI, register akan membuat profile pemain lokal. Auth penuh bisa disambungkan ke Supabase Auth berikutnya.</p>
+          </form>
+        </div>
       </section>
     </main>
+  `;
+}
+
+function authPreviewHole(moleClass) {
+  return `
+    <span class="auth-preview-hole">
+      <span class="auth-preview-mole ${moleClass}">
+        <span class="auth-preview-eye eye-left"></span>
+        <span class="auth-preview-eye eye-right"></span>
+        <span class="auth-preview-nose"></span>
+      </span>
+      <span class="auth-preview-dirt"></span>
+    </span>
   `;
 }
 
@@ -550,16 +670,49 @@ function scoreRows(players) {
 }
 
 function bindLogin() {
+  const authCard = document.querySelector("#authCard");
+  const loginTab = document.querySelector("#loginTab");
+  const registerTab = document.querySelector("#registerTab");
+  const loginForm = document.querySelector("#loginForm");
+  const registerForm = document.querySelector("#registerForm");
+  const authTitle = document.querySelector("#authTitle");
+  const authSubtitle = document.querySelector("#authSubtitle");
+
+  const setAuthMode = (mode) => {
+    const isRegister = mode === "register";
+    authCard.classList.toggle("is-register", isRegister);
+    loginTab.classList.toggle("active", !isRegister);
+    registerTab.classList.toggle("active", isRegister);
+    loginForm.classList.toggle("active", !isRegister);
+    registerForm.classList.toggle("active", isRegister);
+    authTitle.textContent = isRegister ? "Buat Akun Kebun" : "Selamat Datang";
+    authSubtitle.textContent = isRegister
+      ? "Siapkan nama petani untuk mulai mengumpulkan skor."
+      : "Masuk sebagai pemain kebun atau lanjut sebagai guest.";
+  };
+
+  loginTab.addEventListener("click", () => setAuthMode("login"));
+  registerTab.addEventListener("click", () => setAuthMode("register"));
+
   document.querySelector("#loginForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const username = document.querySelector("#username").value;
     login(username, false);
   });
 
+  registerForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const username = document.querySelector("#registerUsername").value;
+    login(username, false);
+    showToast("Akun prototype dibuat. Integrasi register Supabase bisa ditambahkan setelah schema auth final.");
+  });
+
   document.querySelector("#guestBtn").addEventListener("click", () => {
     const username = document.querySelector("#username").value || `Guest${Math.floor(Math.random() * 900 + 100)}`;
     login(username, true);
   });
+
+  document.querySelector("#googleLoginBtn").addEventListener("click", loginWithGoogle);
 }
 
 function bindMenu() {
@@ -698,7 +851,7 @@ function bindLeaderboard() {
 
 function bindSettings() {
   document.querySelector("#backMenu").addEventListener("click", goMenu);
-  document.querySelector("#settingsForm").addEventListener("submit", (event) => {
+  document.querySelector("#settingsForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const username = document.querySelector("#settingsUsername").value;
     if (!isUsernameAllowed(username)) {
@@ -713,13 +866,15 @@ function bindSettings() {
       bio: document.querySelector("#settingsBio").value.trim()
     };
     sendProfile();
+    await upsertSupabaseProfile();
     showToast("Profil tersimpan.");
     render();
   });
 
-  document.querySelector("#logout").addEventListener("click", () => {
+  document.querySelector("#logout").addEventListener("click", async () => {
     stopGameplay();
     send("room:leave");
+    await signOutSupabase();
     state = {
       ...state,
       view: VIEW.LOGIN,
@@ -734,6 +889,85 @@ function bindSettings() {
   document.querySelector("#contactCs").addEventListener("click", () => {
     showToast("CS: support@whackrush.local");
   });
+}
+
+async function loginWithGoogle() {
+  const client = await initSupabase();
+
+  if (!client) {
+    showToast("Supabase belum siap. Cek VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY.");
+    return;
+  }
+
+  const { error } = await client.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: getAuthRedirectUrl()
+    }
+  });
+
+  if (error) {
+    showToast(error.message || "Login Google gagal.");
+  }
+}
+
+async function applySupabaseSession(session) {
+  if (!session?.user) return;
+
+  authSession = session;
+  authUser = session.user;
+
+  const metadata = authUser.user_metadata || {};
+  const fallbackUsername = authUser.email?.split("@")[0] || "Player";
+  const username = metadata.user_name || metadata.preferred_username || metadata.full_name || metadata.name || fallbackUsername;
+
+  state.profile = {
+    ...state.profile,
+    username: cleanUsername(username),
+    avatar: metadata.avatar_url || metadata.picture || state.profile.avatar,
+    guest: false
+  };
+
+  sendProfile();
+  await upsertSupabaseProfile();
+
+  if (state.view === VIEW.LOGIN) {
+    state.view = VIEW.MENU;
+  }
+
+  render();
+}
+
+async function upsertSupabaseProfile() {
+  if (!supabase || !authUser || state.profile.guest) return;
+
+  const { error } = await supabase
+    .from("profiles")
+    .upsert({
+      id: authUser.id,
+      username: state.profile.username,
+      avatar_url: state.profile.avatar,
+      bio: state.profile.bio || "",
+      updated_at: new Date().toISOString()
+    }, {
+      onConflict: "id"
+    });
+
+  if (error) {
+    console.warn("Gagal sync profile Supabase:", error.message);
+  }
+}
+
+async function signOutSupabase() {
+  if (!supabase || !authSession) return;
+
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    console.warn("Supabase sign out gagal:", error.message);
+  }
+
+  authSession = null;
+  authUser = null;
 }
 
 function login(username, guest) {
@@ -1077,6 +1311,23 @@ function sendProfile() {
 function send(type, payload = {}) {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
   socket.send(JSON.stringify({ type, payload }));
+}
+
+function hasSupabaseConfig() {
+  return Boolean(appConfig.supabaseUrl && appConfig.supabaseAnonKey);
+}
+
+function getAuthRedirectUrl() {
+  return appConfig.authRedirectUrl || window.location.origin;
+}
+
+function cleanUsername(value) {
+  const username = String(value || "")
+    .replace(/[<>]/g, "")
+    .trim()
+    .slice(0, 20);
+
+  return username || "Player";
 }
 
 function isUsernameAllowed(username) {

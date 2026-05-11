@@ -3,6 +3,8 @@ const fs = require("fs");
 const path = require("path");
 const { WebSocketServer } = require("ws");
 
+loadEnvFile(path.join(__dirname, ".env"));
+
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
 const GAME_DURATION_MS = 60_000;
@@ -24,6 +26,17 @@ const rooms = new Map();
 
 const server = http.createServer((req, res) => {
   const urlPath = decodeURIComponent(new URL(req.url, `http://${req.headers.host}`).pathname);
+
+  if (urlPath === "/config.js") {
+    const config = getPublicConfig();
+    res.writeHead(200, {
+      "Content-Type": "application/javascript; charset=utf-8",
+      "Cache-Control": "no-store"
+    });
+    res.end(`window.APP_CONFIG = Object.freeze(${JSON.stringify(config)});\n`);
+    return;
+  }
+
   const requestedPath = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
   const filePath = path.resolve(PUBLIC_DIR, requestedPath);
 
@@ -396,6 +409,44 @@ function createId(prefix) {
 
 function cleanText(value) {
   return String(value).replace(/[<>]/g, "").trim();
+}
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return;
+
+  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex === -1) continue;
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const rawValue = trimmed.slice(separatorIndex + 1).trim();
+    const value = rawValue.replace(/^["']|["']$/g, "");
+
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+function getPublicConfig() {
+  return {
+    appUrl: getEnv("VITE_APP_URL", "APP_URL") || `http://localhost:${PORT}`,
+    supabaseUrl: getEnv("VITE_SUPABASE_URL", "SUPABASE_URL", "SUPABASE_PROJECT_URL"),
+    supabaseAnonKey: getEnv("VITE_SUPABASE_ANON_KEY", "SUPABASE_ANON_KEY"),
+    authRedirectUrl: getEnv("VITE_AUTH_REDIRECT_URL", "AUTH_REDIRECT_URL") || `http://localhost:${PORT}`,
+    avatarBucket: getEnv("VITE_SUPABASE_AVATAR_BUCKET", "SUPABASE_AVATAR_BUCKET") || "avatars"
+  };
+}
+
+function getEnv(...keys) {
+  for (const key of keys) {
+    if (process.env[key]) return process.env[key];
+  }
+  return "";
 }
 
 server.listen(PORT, () => {
