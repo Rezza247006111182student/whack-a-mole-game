@@ -230,7 +230,9 @@ function render() {
     ? "app-shell auth-shell"
     : state.view === VIEW.SETTINGS
       ? "app-shell settings-shell"
-      : "app-shell";
+      : [VIEW.MENU, VIEW.LOBBY, VIEW.ROOM].includes(state.view)
+        ? "app-shell menu-shell"
+        : "app-shell";
   syncMenuBgm();
 
   if (state.view === VIEW.LOGIN) {
@@ -386,18 +388,38 @@ function authPreviewHole(moleClass) {
 
 function menuTemplate() {
   return `
-    <main class="screen">
-      <header class="menu-topbar">
+    <main class="screen farm-menu">
+      <header class="menu-topbar farm-menu-topbar">
         <div>
-          <span class="eyebrow"><span class="logo-mark"></span> Whack Rush Arena</span>
+          <span class="eyebrow farm-eyebrow"><i class="fa-solid fa-seedling"></i> Farm village arcade</span>
           <h2>Menu Utama</h2>
+          <p class="muted">Pilih jalur bermain, panen poin, lalu rebut papan skor kebun.</p>
         </div>
-        ${profileChip()}
+        <div class="actions menu-actions">
+          ${profileChip()}
+          <button class="button menu-back-login" id="backLogin" type="button">
+            <span class="back-glyph" aria-hidden="true">&lt;</span>
+            Kembali ke Login
+          </button>
+        </div>
       </header>
 
-      <section class="menu-grid">
+      <section class="farm-menu-hero" aria-label="Ringkasan permainan">
+        <div class="farm-menu-hero-copy">
+          <span class="tag warn">Whack Rush Farm</span>
+          <h1>Siap panen skor?</h1>
+          <p>Masuk ke arena, pukul mole yang muncul, hindari jebakan, dan manfaatkan efek spesial untuk mengejar skor tertinggi.</p>
+        </div>
+        <div class="farm-menu-preview" aria-hidden="true">
+          ${authPreviewHole("mole-one")}
+          ${authPreviewHole("mole-two")}
+          ${authPreviewHole("mole-three")}
+        </div>
+      </section>
+
+      <section class="menu-grid farm-menu-grid">
         <button class="panel mode-card" data-view="solo">
-          <span class="mode-icon">⚒</span>
+          <span class="mode-icon"><i class="fa-solid fa-hammer"></i></span>
           <span>
             <h2>Solo Match</h2>
             <p>Main offline selama satu menit dan pecahkan skor pribadi.</p>
@@ -405,7 +427,7 @@ function menuTemplate() {
           <span class="tag warn">Offline</span>
         </button>
         <button class="panel mode-card" data-view="multiplayer">
-          <span class="mode-icon">⌁</span>
+          <span class="mode-icon"><i class="fa-solid fa-people-group"></i></span>
           <span>
             <h2>Multiplayer</h2>
             <p>Lihat room, buat room baru, atau masuk memakai kode room.</p>
@@ -413,7 +435,7 @@ function menuTemplate() {
           <span class="tag">WebSocket</span>
         </button>
         <button class="panel mode-card" data-view="settings">
-          <span class="mode-icon">☼</span>
+          <span class="mode-icon"><i class="fa-solid fa-gear"></i></span>
           <span>
             <h2>Settings</h2>
             <p>Edit username, foto profil, bio, logout, dan hubungi CS.</p>
@@ -439,17 +461,21 @@ function lobbyTemplate() {
     : `<div class="empty-state">Belum ada room aktif. Buat room dulu untuk mulai multiplayer.</div>`;
 
   return `
-    <main class="screen">
-      <header class="menu-topbar">
+    <main class="screen farm-menu farm-lobby">
+      <header class="menu-topbar farm-menu-topbar farm-lobby-topbar">
         <div>
-          <span class="eyebrow"><span class="logo-mark"></span> Multiplayer Lobby</span>
+          <span class="eyebrow farm-eyebrow"><i class="fa-solid fa-people-group"></i> Multiplayer farm room</span>
           <h2>Room Tersedia</h2>
+          <p class="muted">Buat room baru atau masuk ke kebun teman lewat kode room.</p>
         </div>
-        <button class="button ghost" id="backMenu">Kembali</button>
+        <button class="button menu-back-login" id="backMenu" type="button">
+          <span class="back-glyph" aria-hidden="true">&lt;</span>
+          Menu Utama
+        </button>
       </header>
 
-      <section class="split">
-        <div class="panel padded stack">
+      <section class="split farm-lobby-layout">
+        <div class="panel padded stack farm-lobby-board">
           <h3>Buat atau Join</h3>
           <button class="button" id="createRoom" ${state.connected ? "" : "disabled"}>Buat Room</button>
           <form class="form-stack" id="joinForm">
@@ -461,7 +487,7 @@ function lobbyTemplate() {
           </form>
           <p class="muted">${state.connected ? "Koneksi multiplayer aktif." : "Menyambungkan ke server..."}</p>
         </div>
-        <div class="room-list">${rows}</div>
+        <div class="room-list farm-room-list">${rows}</div>
       </section>
     </main>
   `;
@@ -476,27 +502,30 @@ function roomTemplate() {
   const allReady = room.players.length > 0 && room.players.every((player) => player.ready);
 
   return `
-    <main class="screen">
-      <header class="room-header">
+    <main class="screen farm-menu farm-room">
+      <header class="room-header farm-menu-topbar farm-room-topbar">
         <div>
-          <span class="eyebrow"><span class="logo-mark"></span> Room <strong>${room.code}</strong></span>
+          <span class="eyebrow farm-eyebrow"><i class="fa-solid fa-door-open"></i> Room <strong>${room.code}</strong></span>
           <h2>Menunggu Pemain</h2>
           <p class="muted">Host bisa mulai saat semua pemain ready.</p>
         </div>
         <div class="actions">
-          <button class="button secondary" id="copyRoom">Salin Kode</button>
-          <button class="button ghost" id="leaveRoom">Keluar</button>
+          <button class="button secondary" id="copyRoom" type="button">Salin Kode</button>
+          <button class="button menu-back-login" id="leaveRoom" type="button">
+            <span class="back-glyph" aria-hidden="true">&lt;</span>
+            Keluar
+          </button>
         </div>
       </header>
 
-      <section class="split">
-        <div class="panel padded stack">
+      <section class="split farm-room-layout">
+        <div class="panel padded stack farm-room-board">
           <h3>Status Room</h3>
           <button class="button" id="readyBtn">${me?.ready ? "Batalkan Ready" : "Ready"}</button>
           <button class="button secondary" id="startBtn" ${isHost && allReady ? "" : "disabled"}>Mulai Game</button>
           <p class="muted">${isHost ? "Kamu adalah host." : "Tunggu host memulai permainan."}</p>
         </div>
-        <div class="stack">
+        <div class="stack farm-player-list">
           ${room.players.map((player) => `
             <div class="player-row">
               <div class="player-name">
@@ -777,6 +806,8 @@ function bindLogin() {
 }
 
 function bindMenu() {
+  document.querySelector("#backLogin").addEventListener("click", goLogin);
+
   document.querySelector('[data-view="solo"]').addEventListener("click", () => {
     startSolo();
   });
@@ -1600,6 +1631,12 @@ function randomInt(min, max) {
 function goMenu() {
   stopGameplay();
   state.view = VIEW.MENU;
+  render();
+}
+
+function goLogin() {
+  stopGameplay();
+  state.view = VIEW.LOGIN;
   render();
 }
 
