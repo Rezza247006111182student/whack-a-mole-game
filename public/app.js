@@ -1350,6 +1350,11 @@ function hitHole(event) {
   const mole = state.gameplay?.holes[index];
   if (!mole || mole.phase !== "active") return;
 
+  // Play Hammer Hit Sound
+  const hitSfx = new Audio("asset/music/Sword_Armor_Tool Break (Minecraft Sound) - Sound Effect for editing - Sound Library.mp3");
+  hitSfx.volume = 0.6;
+  hitSfx.play().catch(err => console.warn("Hit sound blocked:", err));
+
   const points = applyMoleEffect(mole.type, mole.points);
   popScore(hole, points);
   dismissMole(index, mole.id, "hit");
