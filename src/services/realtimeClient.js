@@ -164,6 +164,7 @@ function createSupabaseRealtimeClient({
   let roomTimer = null;
   let joinValidationTimer = null;
   let joinedAt = Date.now();
+  let presenceRevision = 0;
   let playerState = {
     ready: false,
     score: 0,
@@ -505,6 +506,7 @@ function createSupabaseRealtimeClient({
             ? roomEndsAt
             : null,
       joinedAt,
+      presenceRevision: ++presenceRevision,
       updatedAt: Date.now(),
     };
     lobbyChannel.track(payload);
@@ -535,6 +537,7 @@ function createSupabaseRealtimeClient({
       roomStatus: overrides.roomStatus ?? roomStatus,
       roomEndsAt: overrides.roomEndsAt ?? roomEndsAt,
       joinedAt,
+      presenceRevision: ++presenceRevision,
       updatedAt: Date.now(),
     };
     roomChannel.track(payload);
@@ -555,7 +558,9 @@ function createSupabaseRealtimeClient({
       if (!playerIdValue) continue;
 
       const entryJoinedAt = entry.joinedAt || Date.now();
+      const entryRevision = Number(entry.presenceRevision || 0);
       const entryUpdatedAt = entry.updatedAt || entryJoinedAt;
+      const entryOrder = entryRevision || entryUpdatedAt;
 
       const room = rooms.get(code) || {
         code,
@@ -568,11 +573,14 @@ function createSupabaseRealtimeClient({
       };
 
       const existingPlayer = room.players.get(playerIdValue);
+      const existingRevision = Number(existingPlayer?.presenceRevision || 0);
       const existingUpdatedAt = existingPlayer?.updatedAt ?? -1;
+      const existingOrder = existingRevision || existingUpdatedAt;
 
-      if (!existingPlayer || entryUpdatedAt > existingUpdatedAt) {
+      if (!existingPlayer || entryOrder > existingOrder) {
         room.players.set(playerIdValue, {
           joinedAt: entryJoinedAt,
+          presenceRevision: entryRevision,
           updatedAt: entryUpdatedAt,
           username: entry.username || "Host",
           roomStatus: entry.roomStatus || "waiting",
@@ -618,9 +626,13 @@ function createSupabaseRealtimeClient({
       if (!id) continue;
 
       const joinedAt = entry.joinedAt || Date.now();
+      const presenceRevision = Number(entry.presenceRevision || 0);
       const updatedAt = entry.updatedAt || joinedAt;
+      const entryOrder = presenceRevision || updatedAt;
       const existing = playersMap.get(id);
-      if (existing && (existing.updatedAt || 0) >= updatedAt) {
+      const existingOrder =
+        Number(existing?.presenceRevision || 0) || existing?.updatedAt || 0;
+      if (existing && existingOrder >= entryOrder) {
         continue;
       }
 
@@ -634,6 +646,7 @@ function createSupabaseRealtimeClient({
         score: Number(entry.score || 0),
         effect: entry.effect || "Menunggu",
         joinedAt,
+        presenceRevision,
         updatedAt,
         roomStatus: entry.roomStatus || "waiting",
         roomEndsAt: entry.roomEndsAt || null,
