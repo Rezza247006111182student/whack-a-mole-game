@@ -166,6 +166,7 @@ function createSupabaseRealtimeClient({
   let roomStatus = "waiting";
   let roomEndsAt = null;
   let roomTimer = null;
+  let finishAnnounceTimer = null;
   let joinValidationTimer = null;
   let joinedAt = Date.now();
   let presenceRevision = 0;
@@ -216,6 +217,7 @@ function createSupabaseRealtimeClient({
 
   function disconnect() {
     clearRoomTimer();
+    clearFinishAnnounce();
     clearJoinValidation();
     scoreCache.clear();
     finishedCache.clear();
@@ -355,7 +357,10 @@ function createSupabaseRealtimeClient({
     }
 
     roomChannel = supabase.channel(`room:${code}`, {
-      config: { presence: { key: playerId } },
+      config: {
+        presence: { key: playerId },
+        broadcast: { self: true },
+      },
     });
 
     roomChannel
@@ -369,6 +374,7 @@ function createSupabaseRealtimeClient({
           Number(event.payload?.endsAt || 0) || now + GAME_DURATION_MS;
         roomStatus = "playing";
         roomEndsAt = endsAt;
+        clearFinishAnnounce();
         scoreCache.clear();
         finishedCache.clear();
         playerState.score = 0;
@@ -381,17 +387,7 @@ function createSupabaseRealtimeClient({
         syncLobbyRoomStatus();
         handleRoomSync();
       })
-      .on("broadcast", { event: "game:ended" }, () => {
-        const now = Date.now();
-        clearRoomTimer();
-        roomStatus = "ended";
-        playerState.finished = true;
-        playerState.finishedAt = playerState.finishedAt || now;
-        playerState.effect = "Selesai";
-        trackRoomPresence();
-        syncLobbyRoomStatus();
-        handleRoomSync();
-      })
+      .on("broadcast", { event: "game:ended" }, handleRoomEndedBroadcast)
       .subscribe((status) => {
         if (status !== "SUBSCRIBED") return;
         trackRoomPresence();
@@ -419,6 +415,7 @@ function createSupabaseRealtimeClient({
 
   function leaveRoom() {
     clearRoomTimer();
+    clearFinishAnnounce();
     clearJoinValidation();
     if (roomChannel) {
       roomChannel.unsubscribe();
@@ -469,6 +466,7 @@ function createSupabaseRealtimeClient({
     const now = Date.now();
     roomStatus = "playing";
     roomEndsAt = now + GAME_DURATION_MS;
+    clearFinishAnnounce();
     scoreCache.clear();
     finishedCache.clear();
     playerState.score = 0;
@@ -542,16 +540,8 @@ function createSupabaseRealtimeClient({
       score: playerState.score,
       scoreUpdatedAt: playerState.scoreUpdatedAt,
     });
-    roomChannel.send({
-      type: "broadcast",
-      event: "game:finished",
-      payload: {
-        playerId,
-        finishedAt: now,
-        score: playerState.score,
-        effect: playerState.effect,
-      },
-    });
+    announcePlayerFinished();
+    startFinishAnnounce();
 
     const room = buildRoomFromPresence(getRoomPresence());
     if (room) {
@@ -596,11 +586,15 @@ function createSupabaseRealtimeClient({
   }
 
   function endGameIfEveryoneFinished(room) {
-    if (room.status !== "playing") return;
-    if (!room.players.length) return;
-    if (!room.players.every((player) => player.finished)) return;
+    const mergedRoom = {
+      ...room,
+      players: room.players.map((player) => mergeCachedScore(player)),
+    };
+    if (mergedRoom.status !== "playing") return;
+    if (!mergedRoom.players.length) return;
+    if (!mergedRoom.players.every((player) => player.finished)) return;
 
-    endGame();
+    endGame({ room: mergedRoom });
   }
 
   function emitOptimisticRoomUpdate() {
@@ -675,6 +669,7 @@ function createSupabaseRealtimeClient({
     const broadcastEffect = String(event.payload?.effect || "Menunggu hasil").slice(0, 24);
 
     rememberFinished(targetPlayerId, finishedAt, finishedAt);
+    rememberFinishedSnapshot(event.payload?.finishedPlayers);
     if (Number.isFinite(broadcastScore)) {
       rememberScore(
         targetPlayerId,
@@ -689,6 +684,26 @@ function createSupabaseRealtimeClient({
 
     emitRoomUpdate(room);
     endGameIfEveryoneFinished(room);
+  }
+
+  function handleRoomEndedBroadcast(event) {
+    if (!roomChannel || !currentRoomCode) return;
+    if (roomStatus === "ended") return;
+
+    const payloadEndsAt = Number(event.payload?.endsAt);
+    const endedAt = Number.isFinite(payloadEndsAt) ? payloadEndsAt : Date.now();
+    const room = buildRoomFromPresence(getRoomPresence());
+    const players = (room?.players || []).map((player) => ({
+      ...mergeCachedScore(player),
+      finished: true,
+      finishedAt: player.finishedAt || endedAt,
+      effect: "Selesai",
+    }));
+    const leaderboard = Array.isArray(event.payload?.leaderboard) && event.payload.leaderboard.length
+      ? event.payload.leaderboard
+      : getLeaderboard(players);
+
+    completeRoomGame({ room, players, leaderboard, endedAt, broadcast: false });
   }
 
   function rememberScore(playerIdValue, score, effect, updatedAt = Date.now()) {
@@ -728,6 +743,20 @@ function createSupabaseRealtimeClient({
     });
   }
 
+  function rememberFinishedSnapshot(finishedPlayers) {
+    if (!Array.isArray(finishedPlayers)) return;
+
+    for (const player of finishedPlayers) {
+      const finishedPlayerId = String(player?.id || "");
+      if (!finishedPlayerId) continue;
+      rememberFinished(
+        finishedPlayerId,
+        Number(player.finishedAt || Date.now()),
+        Number(player.finishedAt || Date.now()),
+      );
+    }
+  }
+
   function mergeCachedScore(player) {
     const score = normalizeScoreValue(player.score);
     const presenceUpdatedAt =
@@ -751,10 +780,14 @@ function createSupabaseRealtimeClient({
 
     if (player.finished && (!cachedFinished || finishedPresenceUpdatedAt >= cachedFinished.updatedAt)) {
       rememberFinished(player.id, player.finishedAt, finishedPresenceUpdatedAt);
-      return merged;
+      return {
+        ...merged,
+        finished: true,
+        finishedAt: player.finishedAt,
+      };
     }
 
-    if (cachedFinished && cachedFinished.updatedAt > finishedPresenceUpdatedAt) {
+    if (cachedFinished) {
       return {
         ...merged,
         finished: true,
@@ -986,7 +1019,7 @@ function createSupabaseRealtimeClient({
     const host = [...players].sort(
       (a, b) => (a.joinedAt || 0) - (b.joinedAt || 0),
     )[0];
-    const status = host.roomStatus || "waiting";
+    const status = roomStatus === "ended" ? "ended" : host.roomStatus || "waiting";
     const endsAt = host.roomEndsAt || null;
     const orderedPlayers = [...players].sort((a, b) => {
       if (a.id === host.id) return -1;
@@ -1036,34 +1069,126 @@ function createSupabaseRealtimeClient({
     }
   }
 
-  function endGame({ force = false } = {}) {
+  function startFinishAnnounce() {
+    clearFinishAnnounce();
+    let remainingAnnouncements = 4;
+
+    finishAnnounceTimer = setInterval(() => {
+      if (roomStatus !== "playing" || !playerState.finished) {
+        clearFinishAnnounce();
+        return;
+      }
+
+      announcePlayerFinished();
+      remainingAnnouncements -= 1;
+      if (remainingAnnouncements <= 0) {
+        clearFinishAnnounce();
+      }
+    }, 700);
+  }
+
+  function clearFinishAnnounce() {
+    if (finishAnnounceTimer) {
+      clearInterval(finishAnnounceTimer);
+      finishAnnounceTimer = null;
+    }
+  }
+
+  function announcePlayerFinished() {
+    if (!roomChannel || !currentRoomCode || !playerState.finished) return;
+
+    roomChannel.send({
+      type: "broadcast",
+      event: "game:finished",
+      payload: {
+        playerId,
+        finishedAt: playerState.finishedAt || Date.now(),
+        score: playerState.score,
+        effect: playerState.effect,
+        finishedPlayers: getFinishedSnapshot(),
+      },
+    });
+  }
+
+  function getFinishedSnapshot() {
+    const finishedPlayers = [...finishedCache.entries()].map(([id, value]) => ({
+      id,
+      finishedAt: value.finishedAt,
+    }));
+
+    if (playerState.finished && !finishedPlayers.some((player) => player.id === playerId)) {
+      finishedPlayers.push({
+        id: playerId,
+        finishedAt: playerState.finishedAt || Date.now(),
+      });
+    }
+
+    return finishedPlayers;
+  }
+
+  function endGame({ force = false, room: roomSnapshot = null } = {}) {
     if (!roomChannel || roomStatus !== "playing") return;
-    const room = buildRoomFromPresence(getRoomPresence());
-    if (!room || room.hostId !== playerId) return;
+    const room = roomSnapshot || buildRoomFromPresence(getRoomPresence());
+    if (!room) return;
     if (!force && !room.players.every((player) => player.finished)) return;
 
     const now = Date.now();
+    const players = room.players.map((player) => ({
+      ...mergeCachedScore(player),
+      finished: true,
+      finishedAt: player.finishedAt || now,
+      effect: "Selesai",
+    }));
+    completeRoomGame({
+      room,
+      players,
+      leaderboard: getLeaderboard(players),
+      endedAt: now,
+      broadcast: true,
+    });
+  }
+
+  function completeRoomGame({ room, players, leaderboard, endedAt, broadcast }) {
+    clearRoomTimer();
+    clearFinishAnnounce();
     roomStatus = "ended";
+    roomEndsAt = endedAt;
     playerState.finished = true;
-    playerState.finishedAt = playerState.finishedAt || now;
+    playerState.finishedAt = playerState.finishedAt || endedAt;
     playerState.effect = "Selesai";
-    rememberFinished(playerId, playerState.finishedAt, now);
+    rememberFinished(playerId, playerState.finishedAt, endedAt);
     trackRoomPresence({
       roomStatus,
-      roomEndsAt: now,
+      roomEndsAt: endedAt,
       finished: true,
       finishedAt: playerState.finishedAt,
       effect: playerState.effect,
     });
     syncLobbyRoomStatus();
 
-    roomChannel.send({
-      type: "broadcast",
-      event: "game:ended",
-      payload: {},
-    });
+    const endedRoom = room
+      ? {
+          ...room,
+          status: "ended",
+          endsAt: endedAt,
+          players,
+          leaderboard,
+        }
+      : null;
 
-    handleRoomSync();
+    if (endedRoom) {
+      onMessage?.({ type: "room:update", payload: { room: endedRoom } });
+    }
+
+    onMessage?.({ type: "game:ended", payload: { leaderboard } });
+
+    if (broadcast) {
+      roomChannel.send({
+        type: "broadcast",
+        event: "game:ended",
+        payload: { leaderboard, endsAt: endedAt },
+      });
+    }
   }
 
   return {

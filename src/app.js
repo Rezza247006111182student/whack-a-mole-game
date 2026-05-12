@@ -39,6 +39,7 @@ let state = {
   lastError: "",
   leaderboard: [],
   gameplay: null,
+  gameEndedHandled: false,
 };
 
 let renderQueued = false;
@@ -151,26 +152,35 @@ function handleServerMessage(message) {
       return;
     }
 
-    state.room = payload.room;
-    state.leaderboard = payload.room.leaderboard || [];
+    if (
+      state.gameEndedHandled &&
+      payload.room.status === "playing" &&
+      (state.view === VIEW.LEADERBOARD || state.room?.status === "ended")
+    ) {
+      return;
+    }
 
-    if (payload.room.status === "ended") {
+    const nextRoom = mergeRoomRuntimeState(payload.room);
+    state.room = nextRoom;
+    state.leaderboard = nextRoom.leaderboard || [];
+
+    if (nextRoom.status === "ended") {
       stopGameplay();
       state.view = VIEW.LEADERBOARD;
       scheduleRender();
       return;
     }
 
-    if (payload.room.status === "waiting" && state.view !== VIEW.ROOM) {
+    if (nextRoom.status === "waiting" && state.view !== VIEW.ROOM) {
       state.view = VIEW.ROOM;
     }
 
-    if (payload.room.status === "playing" && state.view !== VIEW.GAME) {
+    if (nextRoom.status === "playing" && state.view !== VIEW.GAME) {
       openGame("multiplayer");
       return;
     }
 
-    if (payload.room.status === "playing" && state.view === VIEW.GAME) {
+    if (nextRoom.status === "playing" && state.view === VIEW.GAME) {
       updateGameHud();
       return;
     }
@@ -180,7 +190,9 @@ function handleServerMessage(message) {
   }
 
   if (type === "game:started") {
-    state.room = payload.room;
+    if (state.gameEndedHandled && state.view === VIEW.LEADERBOARD) return;
+    state.gameEndedHandled = false;
+    state.room = mergeRoomRuntimeState(payload.room);
     if (state.view !== VIEW.GAME || !state.gameplay) {
       openGame("multiplayer");
       return;
@@ -195,6 +207,8 @@ function handleServerMessage(message) {
   }
 
   if (type === "game:ended") {
+    if (state.gameEndedHandled) return;
+    state.gameEndedHandled = true;
     state.leaderboard = payload.leaderboard;
     const myRank =
       state.leaderboard.findIndex((p) => p.id === state.playerId) + 1;
@@ -229,6 +243,43 @@ function handleServerMessage(message) {
     state.lastError = payload.message;
     showToast(payload.message);
   }
+}
+
+function mergeRoomRuntimeState(nextRoom) {
+  if (!nextRoom?.players) return nextRoom;
+
+  const previousPlayers = new Map(
+    (state.room?.players || []).map((player) => [player.id, player]),
+  );
+  const preserveFinished =
+    nextRoom.status === "playing" && state.room?.status === "playing";
+
+  const players = nextRoom.players.map((player) => {
+    const previous = previousPlayers.get(player.id);
+    const finished = Boolean(
+      player.finished ||
+        (preserveFinished && previous?.finished) ||
+        (player.id === state.playerId && state.gameplay?.finished),
+    );
+
+    if (!finished) return player;
+
+    return {
+      ...player,
+      finished: true,
+      finishedAt: player.finishedAt || previous?.finishedAt || Date.now(),
+      effect:
+        player.effect && player.effect !== "Normal"
+          ? player.effect
+          : previous?.effect || "Menunggu hasil",
+    };
+  });
+
+  return {
+    ...nextRoom,
+    players,
+    leaderboard: nextRoom.leaderboard || players,
+  };
 }
 
 function render() {
