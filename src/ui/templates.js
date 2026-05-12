@@ -10,7 +10,7 @@ export function createTemplates({ getState, appConfig }) {
     game: () => gameTemplate(getState()),
     leaderboard: () => leaderboardTemplate(getState()),
     settings: () => settingsTemplate(getState()),
-    empty: emptyScreen
+    empty: emptyScreen,
   };
 }
 
@@ -169,7 +169,9 @@ function menuTemplate(state) {
 function lobbyTemplate(state, appConfig) {
   const multiplayerStatus = getMultiplayerStatusText(state, appConfig);
   const rows = state.rooms.length
-    ? state.rooms.map((room) => `
+    ? state.rooms
+        .map(
+          (room) => `
       <div class="room-row">
         <div>
           <strong class="room-code">${room.code}</strong>
@@ -177,7 +179,9 @@ function lobbyTemplate(state, appConfig) {
         </div>
         <button class="button" data-join="${room.code}" ${state.connected ? "" : "disabled"}>Masuk</button>
       </div>
-    `).join("")
+    `,
+        )
+        .join("")
     : `<div class="empty-state">Belum ada room aktif. Buat room dulu untuk mulai multiplayer.</div>`;
 
   return `
@@ -219,7 +223,8 @@ function roomTemplate(state) {
 
   const me = room.players.find((player) => player.id === state.playerId);
   const isHost = room.hostId === state.playerId;
-  const allReady = room.players.length > 0 && room.players.every((player) => player.ready);
+  const allReady =
+    room.players.length > 0 && room.players.every((player) => player.ready);
 
   return `
     <main class="screen farm-menu farm-room">
@@ -246,7 +251,9 @@ function roomTemplate(state) {
           <p class="muted">${isHost ? "Kamu adalah host." : "Tunggu host memulai permainan."}</p>
         </div>
         <div class="stack farm-player-list">
-          ${room.players.map((player) => `
+          ${room.players
+            .map(
+              (player) => `
             <div class="player-row">
               <div class="player-name">
                 ${avatarTemplate(player)}
@@ -257,7 +264,9 @@ function roomTemplate(state) {
               </div>
               <span class="tag ${player.ready ? "" : "dark"}">${player.ready ? "Ready" : "Waiting"}</span>
             </div>
-          `).join("")}
+          `,
+            )
+            .join("")}
         </div>
       </section>
     </main>
@@ -268,8 +277,12 @@ function gameTemplate(state) {
   const gameplay = state.gameplay;
   const isSolo = state.mode === "solo";
   const players = isSolo ? state.soloPlayers : state.room?.players || [];
-  const me = players.find((player) => player.id === state.playerId) || players[0];
-  const remaining = Math.max(0, Math.ceil(((gameplay?.endsAt || Date.now()) - Date.now()) / 1000));
+  const me =
+    players.find((player) => player.id === state.playerId) || players[0];
+  const remaining = Math.max(
+    0,
+    Math.ceil(((gameplay?.endsAt || Date.now()) - Date.now()) / 1000),
+  );
   const leader = [...players].sort((a, b) => b.score - a.score)[0];
 
   return `
@@ -305,12 +318,16 @@ function gameTemplate(state) {
           <section class="panel padded">
             <h3>Status Efek</h3>
             <div class="effect-list" id="effectList">
-              ${players.map((player) => `
+              ${players
+                .map(
+                  (player) => `
                 <div class="player-row">
                   <div class="player-name">${avatarTemplate(player)}<strong>${escapeHtml(player.username)}</strong></div>
                   <span class="tag dark">${escapeHtml(player.effect || "Normal")}</span>
                 </div>
-              `).join("")}
+              `,
+                )
+                .join("")}
             </div>
           </section>
           <section class="panel padded">
@@ -324,9 +341,10 @@ function gameTemplate(state) {
 }
 
 function leaderboardTemplate(state) {
-  const leaderboard = state.mode === "solo"
-    ? [...state.soloPlayers].sort((a, b) => b.score - a.score)
-    : state.leaderboard;
+  const leaderboard =
+    state.mode === "solo"
+      ? [...state.soloPlayers].sort((a, b) => b.score - a.score)
+      : state.leaderboard;
 
   return `
     <main class="screen">
@@ -343,7 +361,10 @@ function leaderboardTemplate(state) {
 
       <section class="panel padded">
         <div class="leader-list">
-          ${leaderboard.map((player, index) => `
+          ${
+            leaderboard
+              .map(
+                (player, index) => `
             <div class="leader-row">
               <div class="player-name">
                 <span class="tag ${index === 0 ? "warn" : "dark"}">#${index + 1}</span>
@@ -352,7 +373,11 @@ function leaderboardTemplate(state) {
               </div>
               <span class="score-number">${player.score} pts</span>
             </div>
-          `).join("") || `<div class="empty-state">Belum ada hasil permainan.</div>`}
+          `,
+              )
+              .join("") ||
+            `<div class="empty-state">Belum ada hasil permainan.</div>`
+          }
         </div>
       </section>
     </main>
@@ -452,6 +477,10 @@ function getMultiplayerStatusText(state, appConfig) {
     return "Multiplayer belum aktif di build frontend. Jalankan backend lokal atau siapkan Supabase Realtime.";
   }
 
+  if (appConfig.realtimeMode === "supabase") {
+    return "Menyambungkan ke Supabase Realtime...";
+  }
+
   return "Menyambungkan ke server...";
 }
 
@@ -480,7 +509,8 @@ export function avatarTemplate(profile) {
     return `<span class="avatar"><img src="${escapeAttribute(profile.avatar)}" alt=""></span>`;
   }
 
-  const initial = (profile.username || "P").trim().charAt(0).toUpperCase() || "P";
+  const initial =
+    (profile.username || "P").trim().charAt(0).toUpperCase() || "P";
   return `<span class="avatar-fallback">${escapeHtml(initial)}</span>`;
 }
 
@@ -489,17 +519,21 @@ function largeAvatarTemplate(profile) {
     return `<span class="large-avatar"><img src="${escapeAttribute(profile.avatar)}" alt=""></span>`;
   }
 
-  const initial = (profile.username || "P").trim().charAt(0).toUpperCase() || "P";
+  const initial =
+    (profile.username || "P").trim().charAt(0).toUpperCase() || "P";
   return `<span class="large-avatar fallback">${escapeHtml(initial)}</span>`;
 }
 
 export function scoreRows(players) {
   return [...players]
     .sort((a, b) => b.score - a.score)
-    .map((player) => `
+    .map(
+      (player) => `
       <div class="player-row">
         <div class="player-name">${avatarTemplate(player)}<strong>${escapeHtml(player.username)}</strong></div>
         <span class="score-number">${player.score}</span>
       </div>
-    `).join("");
+    `,
+    )
+    .join("");
 }
