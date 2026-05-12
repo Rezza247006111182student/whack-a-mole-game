@@ -159,6 +159,10 @@ function createSupabaseRealtimeClient({
   const supabaseAnonKey = supabaseConfig?.anonKey || "";
   const lobbyChannelName =
     supabaseConfig?.lobbyChannel || DEFAULT_LOBBY_CHANNEL;
+  const realtimeDebug = Boolean(supabaseConfig?.debug);
+  if (realtimeDebug) {
+    globalThis.__MOLE_REALTIME_DEBUG__ = true;
+  }
 
   let supabase = null;
   let lobbyChannel = null;
@@ -217,6 +221,7 @@ function createSupabaseRealtimeClient({
       .on("broadcast", { event: "presence:refresh" }, handleLobbySync)
       .subscribe((status) => {
         lobbySubscribed = status === "SUBSCRIBED";
+        debugRealtime("lobby:subscribe", { status });
         if (!lobbySubscribed) return;
         connected = true;
         trackLobbyPresence();
@@ -427,6 +432,7 @@ function createSupabaseRealtimeClient({
       .on("broadcast", { event: "game:ended" }, handleRoomEndedBroadcast)
       .subscribe((status) => {
         roomSubscribed = status === "SUBSCRIBED";
+        debugRealtime("room:subscribe", { code, status });
         if (!roomSubscribed) return;
         trackRoomPresence();
         syncLobbyRoomStatus();
@@ -543,6 +549,11 @@ function createSupabaseRealtimeClient({
       { endsAt: roomEndsAt },
       { queue: false, httpFallback: true },
     );
+    debugRealtime("game:start", {
+      code: currentRoomCode,
+      endsAt: roomEndsAt,
+      players: summarizePlayers(room.players),
+    });
 
     ensureRoomTimer();
     startStateAnnounce();
@@ -581,6 +592,12 @@ function createSupabaseRealtimeClient({
       },
       { queue: false, httpFallback: true },
     );
+    debugRealtime("score:send", {
+      score: playerState.score,
+      scoreRevision: playerState.scoreRevision,
+      points: boundedPoints,
+      effect: playerState.effect,
+    });
     emitOptimisticRoomUpdate();
   }
 
@@ -720,6 +737,13 @@ function createSupabaseRealtimeClient({
         scoreRevision,
       );
     }
+    debugRealtime("score:receive", {
+      playerId: targetPlayerId,
+      score: Number.isFinite(broadcastScore) ? Math.max(0, Math.round(broadcastScore)) : null,
+      scoreRevision,
+      scoreUpdatedAt,
+      self: targetPlayerId === playerId,
+    });
 
     const room = buildRoomFromPresence(getRoomPresence());
     if (!room) return;
@@ -818,6 +842,15 @@ function createSupabaseRealtimeClient({
     const previous = scoreCache.get(playerIdValue);
 
     if (!shouldAcceptScore(previous, normalizedRevision, normalizedUpdatedAt)) {
+      debugRealtime("score:stale-rejected", {
+        playerId: playerIdValue,
+        incoming: {
+          score: normalizedScore,
+          revision: normalizedRevision,
+          updatedAt: normalizedUpdatedAt,
+        },
+        previous,
+      });
       return;
     }
 
@@ -959,12 +992,19 @@ function createSupabaseRealtimeClient({
         });
       }
       if (httpFallback) {
+        debugRealtime("broadcast:http-fallback", { event });
         sendRoomHttpBroadcast(event, payload);
         return true;
       }
+      debugRealtime("broadcast:skipped", {
+        event,
+        roomSubscribed,
+        queue,
+      });
       return false;
     }
 
+    debugRealtime("broadcast:ws", { event });
     roomChannel
       .send({ type: "broadcast", event, payload })
       .catch((error) => console.warn("Room broadcast gagal:", error));
@@ -1172,6 +1212,7 @@ function createSupabaseRealtimeClient({
   function buildRoomFromPresence(entries) {
     if (!currentRoomCode) return null;
     const playersMap = new Map();
+    const duplicateIds = new Set();
 
     for (const entry of entries) {
       const id = String(entry.playerId || "");
@@ -1182,6 +1223,7 @@ function createSupabaseRealtimeClient({
       const updatedAt = entry.updatedAt || joinedAt;
       const entryOrder = presenceRevision || updatedAt;
       const existing = playersMap.get(id);
+      if (existing) duplicateIds.add(id);
       const existingOrder =
         Number(existing?.presenceRevision || 0) || existing?.updatedAt || 0;
       if (existing && existingOrder >= entryOrder) {
@@ -1214,6 +1256,12 @@ function createSupabaseRealtimeClient({
     );
 
     if (!players.length) return null;
+    if (duplicateIds.size > 0) {
+      debugRealtime("presence:duplicate-player-id", {
+        ids: [...duplicateIds],
+        entryCount: entries.length,
+      });
+    }
 
     const host = [...players].sort(
       (a, b) => (a.joinedAt || 0) - (b.joinedAt || 0),
@@ -1519,6 +1567,10 @@ function createSupabaseRealtimeClient({
     }
 
     onMessage?.({ type: "game:ended", payload: { leaderboard } });
+    debugRealtime("game:ended", {
+      leaderboard: summarizePlayers(leaderboard),
+      broadcast,
+    });
 
     if (broadcast) {
       sendRoomBroadcast(
@@ -1537,6 +1589,30 @@ function createSupabaseRealtimeClient({
     getStatus,
     clearPendingMessages,
   };
+}
+
+function summarizePlayers(players) {
+  return (players || []).map((player) => ({
+    id: player.id,
+    username: player.username,
+    score: normalizeScoreValue(player.score),
+    scoreRevision: Number(player.scoreRevision || 0),
+    scoreUpdatedAt: Number(player.scoreUpdatedAt || 0),
+    finished: Boolean(player.finished),
+  }));
+}
+
+function debugRealtime(event, payload = {}) {
+  if (!globalThis.__MOLE_REALTIME_DEBUG__) return;
+  const entry = {
+    at: new Date().toISOString(),
+    event,
+    payload,
+  };
+  const logs = globalThis.__MOLE_REALTIME_LOGS__ || [];
+  logs.push(entry);
+  globalThis.__MOLE_REALTIME_LOGS__ = logs.slice(-500);
+  console.debug("[mole realtime]", event, payload);
 }
 
 function flattenPresenceState(state) {

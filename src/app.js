@@ -98,6 +98,7 @@ const realtimeClient = createRealtimeClient({
     url: appConfig.supabaseUrl,
     anonKey: appConfig.supabaseAnonKey,
     lobbyChannel: "lobby",
+    debug: appConfig.realtimeDebug,
   },
   playerId: state.playerId,
   getProfile: () => state.profile,
@@ -144,6 +145,7 @@ function handleServerMessage(message) {
 
   if (type === "room:update") {
     if (!payload.room) {
+      debugRealtime("app:room-null", { view: state.view });
       state.room = null;
       state.leaderboard = [];
       if (state.view === VIEW.ROOM || state.view === VIEW.GAME) {
@@ -162,6 +164,11 @@ function handleServerMessage(message) {
     }
 
     const nextRoom = mergeRoomRuntimeState(payload.room);
+    debugRealtime("app:room-update", {
+      status: nextRoom.status,
+      view: state.view,
+      players: summarizePlayers(nextRoom.players),
+    });
     state.room = nextRoom;
     state.leaderboard = nextRoom.leaderboard || [];
 
@@ -194,6 +201,10 @@ function handleServerMessage(message) {
     if (state.gameEndedHandled && state.view === VIEW.LEADERBOARD) return;
     state.gameEndedHandled = false;
     state.room = mergeRoomRuntimeState(payload.room);
+    debugRealtime("app:game-started", {
+      players: summarizePlayers(state.room?.players || []),
+      endsAt: state.room?.endsAt,
+    });
     if (state.view !== VIEW.GAME || !state.gameplay) {
       openGame("multiplayer");
       return;
@@ -211,6 +222,9 @@ function handleServerMessage(message) {
     if (state.gameEndedHandled) return;
     state.gameEndedHandled = true;
     state.leaderboard = payload.leaderboard;
+    debugRealtime("app:game-ended", {
+      leaderboard: summarizePlayers(state.leaderboard || []),
+    });
     const myRank =
       state.leaderboard.findIndex((p) => p.id === state.playerId) + 1;
     const myResult = state.leaderboard.find(
@@ -338,6 +352,31 @@ function normalizeScoreValue(value) {
   if (!Number.isFinite(score)) return 0;
 
   return Math.max(0, Math.round(score));
+}
+
+function summarizePlayers(players) {
+  return (players || []).map((player) => ({
+    id: player.id,
+    username: player.username,
+    score: normalizeScoreValue(player.score),
+    scoreRevision: Number(player.scoreRevision || 0),
+    scoreUpdatedAt: Number(player.scoreUpdatedAt || 0),
+    finished: Boolean(player.finished),
+  }));
+}
+
+function debugRealtime(event, payload = {}) {
+  if (!appConfig.realtimeDebug) return;
+  const entry = {
+    at: new Date().toISOString(),
+    event,
+    playerId: state.playerId,
+    payload,
+  };
+  const logs = window.__MOLE_REALTIME_LOGS__ || [];
+  logs.push(entry);
+  window.__MOLE_REALTIME_LOGS__ = logs.slice(-500);
+  console.debug("[mole realtime]", event, payload);
 }
 
 function render() {

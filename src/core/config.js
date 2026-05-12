@@ -22,7 +22,10 @@ export function resolveAppConfig() {
     wsUrl: sanitizeConfigValue(
       getFirstConfigValue(windowConfig.wsUrl, viteEnv.VITE_WS_URL, viteEnv.VITE_WEBSOCKET_URL)
     ),
-    realtimeMode: configuredRealtimeMode || (isProductionBuild ? "disabled" : "websocket")
+    realtimeMode: configuredRealtimeMode || (isProductionBuild ? "disabled" : "websocket"),
+    realtimeDebug: isEnabledConfigValue(
+      getFirstConfigValue(windowConfig.realtimeDebug, viteEnv.VITE_REALTIME_DEBUG)
+    )
   };
 }
 
@@ -58,6 +61,11 @@ function sanitizeConfigValue(value) {
   }
 
   return cleaned;
+}
+
+function isEnabledConfigValue(value) {
+  const cleaned = String(value || "").trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(cleaned);
 }
 
 function normalizeWebSocketUrl(value) {
