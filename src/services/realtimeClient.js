@@ -193,6 +193,7 @@ function createSupabaseRealtimeClient({
 
     lobbyChannel
       .on("presence", { event: "sync" }, handleLobbySync)
+      .on("broadcast", { event: "presence:refresh" }, handleLobbySync)
       .subscribe((status) => {
         if (status !== "SUBSCRIBED") return;
         connected = true;
@@ -330,6 +331,7 @@ function createSupabaseRealtimeClient({
 
     roomChannel
       .on("presence", { event: "sync" }, handleRoomSync)
+      .on("broadcast", { event: "presence:refresh" }, handleRoomSync)
       .on("broadcast", { event: "game:started" }, (event) => {
         const endsAt =
           Number(event.payload?.endsAt || 0) || Date.now() + GAME_DURATION_MS;
@@ -483,6 +485,11 @@ function createSupabaseRealtimeClient({
       joinedAt,
     };
     lobbyChannel.track(payload);
+    lobbyChannel.send({
+      type: "broadcast",
+      event: "presence:refresh",
+      payload: {},
+    });
   }
 
   function syncLobbyRoomStatus() {
@@ -507,6 +514,11 @@ function createSupabaseRealtimeClient({
       joinedAt,
     };
     roomChannel.track(payload);
+    roomChannel.send({
+      type: "broadcast",
+      event: "presence:refresh",
+      payload: {},
+    });
   }
 
   function buildRoomSummaries(entries) {
