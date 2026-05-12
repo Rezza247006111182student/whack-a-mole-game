@@ -13,14 +13,23 @@ export function createRealtimeClient(options) {
   return createWebSocketClient(options);
 }
 
-function createWebSocketClient({ getUrl, onDisabled, onOpen, onClose, onMessage }) {
+function createWebSocketClient({
+  getUrl,
+  onDisabled,
+  onOpen,
+  onClose,
+  onMessage,
+}) {
   let socket = null;
   let reconnectTimer = null;
   let pendingMessages = [];
   let intentionalDisconnect = false;
 
   function connect() {
-    if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
+    if (
+      socket?.readyState === WebSocket.OPEN ||
+      socket?.readyState === WebSocket.CONNECTING
+    ) {
       return;
     }
 
@@ -142,7 +151,8 @@ function createSupabaseRealtimeClient({
 }) {
   const supabaseUrl = supabaseConfig?.url || "";
   const supabaseAnonKey = supabaseConfig?.anonKey || "";
-  const lobbyChannelName = supabaseConfig?.lobbyChannel || DEFAULT_LOBBY_CHANNEL;
+  const lobbyChannelName =
+    supabaseConfig?.lobbyChannel || DEFAULT_LOBBY_CHANNEL;
 
   let supabase = null;
   let lobbyChannel = null;
@@ -152,6 +162,7 @@ function createSupabaseRealtimeClient({
   let roomStatus = "waiting";
   let roomEndsAt = null;
   let roomTimer = null;
+  let joinValidationTimer = null;
   let joinedAt = Date.now();
   let playerState = {
     ready: false,
@@ -195,6 +206,7 @@ function createSupabaseRealtimeClient({
 
   function disconnect() {
     clearRoomTimer();
+    clearJoinValidation();
     if (roomChannel) {
       roomChannel.unsubscribe();
       roomChannel = null;
@@ -257,7 +269,9 @@ function createSupabaseRealtimeClient({
 
   function applyProfileUpdate(payload) {
     const profile = getProfile?.() || {};
-    const username = String(payload.username || profile.username || "Player").slice(0, 20);
+    const username = String(
+      payload.username || profile.username || "Player",
+    ).slice(0, 20);
     const avatar = String(payload.avatar || profile.avatar || "").slice(0, 400);
     const bio = String(payload.bio || profile.bio || "").slice(0, 120);
     const guest = Boolean(payload.guest ?? profile.guest);
@@ -279,14 +293,14 @@ function createSupabaseRealtimeClient({
 
     const rooms = buildRoomSummaries(getLobbyPresence());
     const existingRoom = rooms.find((room) => room.code === code);
-
-    if (!options.host && !existingRoom) {
-      onMessage?.({ type: "error", payload: { message: "Room tidak ditemukan." } });
-      return;
-    }
+    const joiningAsGuest = !options.host;
+    const shouldValidateMissing = joiningAsGuest && !existingRoom;
 
     if (existingRoom && existingRoom.status !== "waiting") {
-      onMessage?.({ type: "error", payload: { message: "Room sedang bermain. Coba room lain." } });
+      onMessage?.({
+        type: "error",
+        payload: { message: "Room sedang bermain. Coba room lain." },
+      });
       return;
     }
 
@@ -299,6 +313,12 @@ function createSupabaseRealtimeClient({
     roomStatus = "waiting";
     roomEndsAt = null;
     clearRoomTimer();
+    clearJoinValidation();
+    trackLobbyPresence({
+      roomCode: code,
+      roomStatus: "waiting",
+      roomEndsAt: null,
+    });
 
     if (roomChannel) {
       roomChannel.unsubscribe();
@@ -313,7 +333,8 @@ function createSupabaseRealtimeClient({
       .on("presence", { event: "sync" }, handleRoomSync)
       .on("broadcast", { event: "presence:refresh" }, handleRoomSync)
       .on("broadcast", { event: "game:started" }, (event) => {
-        const endsAt = Number(event.payload?.endsAt || 0) || Date.now() + GAME_DURATION_MS;
+        const endsAt =
+          Number(event.payload?.endsAt || 0) || Date.now() + GAME_DURATION_MS;
         roomStatus = "playing";
         roomEndsAt = endsAt;
         playerState.score = 0;
@@ -333,11 +354,29 @@ function createSupabaseRealtimeClient({
         trackRoomPresence();
         syncLobbyRoomStatus();
         handleRoomSync();
+
+        if (shouldValidateMissing && !joinValidationTimer) {
+          joinValidationTimer = setTimeout(() => {
+            joinValidationTimer = null;
+            const room = buildRoomFromPresence(getRoomPresence());
+            if (!room) return;
+            const onlyMe =
+              room.players.length === 1 && room.players[0].id === playerId;
+            if (onlyMe) {
+              leaveRoom();
+              onMessage?.({
+                type: "error",
+                payload: { message: "Room tidak ditemukan." },
+              });
+            }
+          }, 1200);
+        }
       });
   }
 
   function leaveRoom() {
     clearRoomTimer();
+    clearJoinValidation();
     if (roomChannel) {
       roomChannel.unsubscribe();
       roomChannel = null;
@@ -367,11 +406,15 @@ function createSupabaseRealtimeClient({
     if (!room) return;
 
     const isHost = room.hostId === playerId;
-    const everyoneReady = room.players.length > 0 && room.players.every((player) => player.ready);
+    const everyoneReady =
+      room.players.length > 0 && room.players.every((player) => player.ready);
 
     if (!isHost) return;
     if (!everyoneReady) {
-      onMessage?.({ type: "error", payload: { message: "Semua pemain harus ready dulu." } });
+      onMessage?.({
+        type: "error",
+        payload: { message: "Semua pemain harus ready dulu." },
+      });
       return;
     }
 
@@ -410,6 +453,10 @@ function createSupabaseRealtimeClient({
     if (!roomChannel) return;
     const room = buildRoomFromPresence(getRoomPresence());
     if (!room) return;
+
+    if (joinValidationTimer && room.players.length > 1) {
+      clearJoinValidation();
+    }
 
     if (room.status === "playing") {
       ensureRoomTimer();
@@ -461,7 +508,11 @@ function createSupabaseRealtimeClient({
       updatedAt: Date.now(),
     };
     lobbyChannel.track(payload);
-    lobbyChannel.send({ type: "broadcast", event: "presence:refresh", payload: {} });
+    lobbyChannel.send({
+      type: "broadcast",
+      event: "presence:refresh",
+      payload: {},
+    });
   }
 
   function syncLobbyRoomStatus() {
@@ -487,7 +538,11 @@ function createSupabaseRealtimeClient({
       updatedAt: Date.now(),
     };
     roomChannel.track(payload);
-    roomChannel.send({ type: "broadcast", event: "presence:refresh", payload: {} });
+    roomChannel.send({
+      type: "broadcast",
+      event: "presence:refresh",
+      payload: {},
+    });
   }
 
   function buildRoomSummaries(entries) {
@@ -547,6 +602,13 @@ function createSupabaseRealtimeClient({
       }));
   }
 
+  function clearJoinValidation() {
+    if (joinValidationTimer) {
+      clearTimeout(joinValidationTimer);
+      joinValidationTimer = null;
+    }
+  }
+
   function buildRoomFromPresence(entries) {
     if (!currentRoomCode) return null;
     const playersMap = new Map();
@@ -582,7 +644,9 @@ function createSupabaseRealtimeClient({
 
     if (!players.length) return null;
 
-    const host = [...players].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))[0];
+    const host = [...players].sort(
+      (a, b) => (a.joinedAt || 0) - (b.joinedAt || 0),
+    )[0];
     const status = host.roomStatus || "waiting";
     const endsAt = host.roomEndsAt || null;
 
@@ -674,7 +738,11 @@ function getLeaderboard(players) {
       guest: player.guest,
       score: Number(player.score || 0),
     }))
-    .sort((a, b) => b.score - a.score || String(a.username).localeCompare(String(b.username)));
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        String(a.username).localeCompare(String(b.username)),
+    );
 }
 
 function createRoomCode() {
