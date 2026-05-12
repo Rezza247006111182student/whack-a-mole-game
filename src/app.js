@@ -256,21 +256,41 @@ function mergeRoomRuntimeState(nextRoom) {
 
   const players = nextRoom.players.map((player) => {
     const previous = previousPlayers.get(player.id);
+    const scoreState =
+      nextRoom.status === "playing" && shouldKeepPreviousScore(previous, player)
+        ? {
+            score: previous.score,
+            effect: previous.effect || player.effect,
+            scoreUpdatedAt: previous.scoreUpdatedAt,
+            scoreRevision: previous.scoreRevision,
+          }
+        : {
+            score: player.score,
+            effect: player.effect,
+            scoreUpdatedAt: player.scoreUpdatedAt,
+            scoreRevision: player.scoreRevision,
+          };
     const finished = Boolean(
       player.finished ||
         (preserveFinished && previous?.finished) ||
         (player.id === state.playerId && state.gameplay?.finished),
     );
 
-    if (!finished) return player;
+    if (!finished) {
+      return {
+        ...player,
+        ...scoreState,
+      };
+    }
 
     return {
       ...player,
+      ...scoreState,
       finished: true,
       finishedAt: player.finishedAt || previous?.finishedAt || Date.now(),
       effect:
-        player.effect && player.effect !== "Normal"
-          ? player.effect
+        scoreState.effect && scoreState.effect !== "Normal"
+          ? scoreState.effect
           : previous?.effect || "Menunggu hasil",
     };
   });
@@ -278,8 +298,45 @@ function mergeRoomRuntimeState(nextRoom) {
   return {
     ...nextRoom,
     players,
-    leaderboard: nextRoom.leaderboard || players,
+    leaderboard: buildRoomLeaderboard(players),
   };
+}
+
+function buildRoomLeaderboard(players) {
+  return [...players]
+    .map((player) => ({
+      id: player.id,
+      username: player.username,
+      avatar: player.avatar,
+      guest: player.guest,
+      score: normalizeScoreValue(player.score),
+    }))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        String(a.username).localeCompare(String(b.username)),
+    );
+}
+
+function shouldKeepPreviousScore(previous, player) {
+  if (!previous) return false;
+
+  const previousRevision = Number(previous.scoreRevision || 0);
+  const nextRevision = Number(player.scoreRevision || 0);
+  if (previousRevision || nextRevision) {
+    return previousRevision > nextRevision;
+  }
+
+  const previousUpdatedAt = Number(previous.scoreUpdatedAt || 0);
+  const nextUpdatedAt = Number(player.scoreUpdatedAt || 0);
+  return previousUpdatedAt > nextUpdatedAt;
+}
+
+function normalizeScoreValue(value) {
+  const score = Number(value);
+  if (!Number.isFinite(score)) return 0;
+
+  return Math.max(0, Math.round(score));
 }
 
 function render() {

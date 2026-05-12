@@ -506,6 +506,8 @@ export function createGameplayController({
 
     me.score = Math.max(0, normalizeScoreValue(me.score) + points);
     me.effect = effect;
+    me.scoreUpdatedAt = Date.now();
+    me.scoreRevision = (Number(me.scoreRevision) || 0) + 1;
     state.leaderboard = [...players]
       .map((player) => ({
         id: player.id,

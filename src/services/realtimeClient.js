@@ -5,6 +5,8 @@ const MAX_ROOM_PLAYERS = 6;
 const GAME_DURATION_MS = 60_000;
 const MAX_BONUS_TIME_MS = 60_000;
 const GAME_END_GRACE_MS = 5_000;
+const SCORE_PRESENCE_SYNC_MS = 900;
+const BROADCAST_HTTP_TIMEOUT_MS = 1200;
 const MIN_SCORE_DELTA = -20;
 const MAX_SCORE_DELTA = 60;
 
@@ -170,6 +172,8 @@ function createSupabaseRealtimeClient({
   let roomTimer = null;
   let stateAnnounceTimer = null;
   let finishAnnounceTimer = null;
+  let scorePresenceTimer = null;
+  let lastScorePresenceSyncAt = 0;
   let joinValidationTimer = null;
   let joinedAt = Date.now();
   let presenceRevision = 0;
@@ -182,6 +186,7 @@ function createSupabaseRealtimeClient({
     score: 0,
     effect: "Menunggu",
     scoreUpdatedAt: Date.now(),
+    scoreRevision: 0,
     finished: false,
     finishedAt: null,
   };
@@ -226,6 +231,7 @@ function createSupabaseRealtimeClient({
     clearRoomTimer();
     clearStateAnnounce();
     clearFinishAnnounce();
+    clearScorePresenceSync();
     clearJoinValidation();
     lobbySubscribed = false;
     roomSubscribed = false;
@@ -320,6 +326,7 @@ function createSupabaseRealtimeClient({
       score: 0,
       effect: "Menunggu",
       scoreUpdatedAt: Date.now(),
+      scoreRevision: 0,
       finished: false,
       finishedAt: null,
     };
@@ -356,6 +363,7 @@ function createSupabaseRealtimeClient({
     roomStatus = "waiting";
     roomEndsAt = null;
     clearRoomTimer();
+    clearScorePresenceSync();
     clearJoinValidation();
     trackLobbyPresence({
       roomCode: code,
@@ -387,18 +395,30 @@ function createSupabaseRealtimeClient({
         const now = Date.now();
         const endsAt =
           Number(event.payload?.endsAt || 0) || now + GAME_DURATION_MS;
+        const alreadyPlaying = roomStatus === "playing";
         roomStatus = "playing";
-        roomEndsAt = endsAt;
+        roomEndsAt = Math.max(Number(roomEndsAt || 0), endsAt);
         clearFinishAnnounce();
-        scoreCache.clear();
-        finishedCache.clear();
-        playerState.score = 0;
-        playerState.effect = "Normal";
-        playerState.scoreUpdatedAt = now;
-        playerState.finished = false;
-        playerState.finishedAt = null;
-        rememberScore(playerId, playerState.score, playerState.effect, now);
-        trackRoomPresence();
+
+        if (!alreadyPlaying) {
+          scoreCache.clear();
+          finishedCache.clear();
+          playerState.score = 0;
+          playerState.effect = "Normal";
+          playerState.scoreUpdatedAt = now;
+          playerState.scoreRevision = 0;
+          playerState.finished = false;
+          playerState.finishedAt = null;
+          rememberScore(
+            playerId,
+            playerState.score,
+            playerState.effect,
+            now,
+            playerState.scoreRevision,
+          );
+        }
+
+        trackRoomPresence({ roomStatus, roomEndsAt });
         syncLobbyRoomStatus();
         startStateAnnounce();
         announcePlayerState("started");
@@ -436,6 +456,7 @@ function createSupabaseRealtimeClient({
     clearRoomTimer();
     clearStateAnnounce();
     clearFinishAnnounce();
+    clearScorePresenceSync();
     clearJoinValidation();
     if (roomChannel) {
       roomChannel.unsubscribe();
@@ -453,6 +474,7 @@ function createSupabaseRealtimeClient({
     playerState.score = 0;
     playerState.effect = "Menunggu";
     playerState.scoreUpdatedAt = Date.now();
+    playerState.scoreRevision = 0;
     playerState.finished = false;
     playerState.finishedAt = null;
 
@@ -494,21 +516,33 @@ function createSupabaseRealtimeClient({
     playerState.score = 0;
     playerState.effect = "Normal";
     playerState.scoreUpdatedAt = now;
+    playerState.scoreRevision = 0;
     playerState.finished = false;
     playerState.finishedAt = null;
-    rememberScore(playerId, playerState.score, playerState.effect, now);
+    rememberScore(
+      playerId,
+      playerState.score,
+      playerState.effect,
+      now,
+      playerState.scoreRevision,
+    );
     trackRoomPresence({
       roomStatus,
       roomEndsAt,
       score: playerState.score,
       effect: playerState.effect,
       scoreUpdatedAt: now,
+      scoreRevision: playerState.scoreRevision,
       finished: false,
       finishedAt: null,
     });
     syncLobbyRoomStatus();
 
-    sendRoomBroadcast("game:started", { endsAt: roomEndsAt });
+    sendRoomBroadcast(
+      "game:started",
+      { endsAt: roomEndsAt },
+      { queue: false, httpFallback: true },
+    );
 
     ensureRoomTimer();
     startStateAnnounce();
@@ -526,8 +560,15 @@ function createSupabaseRealtimeClient({
     playerState.score = Math.max(0, (playerState.score || 0) + boundedPoints);
     playerState.effect = String(effect || "Normal").slice(0, 24);
     playerState.scoreUpdatedAt = now;
-    rememberScore(playerId, playerState.score, playerState.effect, now);
-    trackRoomPresence();
+    playerState.scoreRevision += 1;
+    rememberScore(
+      playerId,
+      playerState.score,
+      playerState.effect,
+      now,
+      playerState.scoreRevision,
+    );
+    scheduleScorePresenceSync();
     sendRoomBroadcast(
       "game:score",
       {
@@ -536,8 +577,9 @@ function createSupabaseRealtimeClient({
         score: playerState.score,
         effect: playerState.effect,
         scoreUpdatedAt: now,
+        scoreRevision: playerState.scoreRevision,
       },
-      { queue: false },
+      { queue: false, httpFallback: true },
     );
     announcePlayerState("score");
     emitOptimisticRoomUpdate();
@@ -552,14 +594,22 @@ function createSupabaseRealtimeClient({
     playerState.finished = true;
     playerState.finishedAt = now;
     playerState.effect = "Menunggu hasil";
+    clearScorePresenceSync();
     rememberFinished(playerId, now, now);
-    rememberScore(playerId, playerState.score, playerState.effect, now);
+    rememberScore(
+      playerId,
+      playerState.score,
+      playerState.effect,
+      now,
+      playerState.scoreRevision,
+    );
     trackRoomPresence({
       finished: true,
       finishedAt: now,
       effect: playerState.effect,
       score: playerState.score,
       scoreUpdatedAt: playerState.scoreUpdatedAt,
+      scoreRevision: playerState.scoreRevision,
     });
     announcePlayerFinished();
     announcePlayerState("finished");
@@ -658,6 +708,7 @@ function createSupabaseRealtimeClient({
     const scoreUpdatedAt = Number.isFinite(payloadScoreUpdatedAt)
       ? payloadScoreUpdatedAt
       : Date.now();
+    const scoreRevision = Number(event.payload?.scoreRevision || 0);
 
     if (Number.isFinite(broadcastScore)) {
       rememberScore(
@@ -665,6 +716,7 @@ function createSupabaseRealtimeClient({
         Math.max(0, Math.round(broadcastScore)),
         broadcastEffect,
         scoreUpdatedAt,
+        scoreRevision,
       );
     }
 
@@ -700,7 +752,12 @@ function createSupabaseRealtimeClient({
       ? payloadFinishedAt
       : Date.now();
     const broadcastScore = Number(event.payload?.score ?? NaN);
-    const broadcastEffect = String(event.payload?.effect || "Menunggu hasil").slice(0, 24);
+    const broadcastEffect = String(
+      event.payload?.effect || "Menunggu hasil",
+    ).slice(0, 24);
+    const scoreRevision = Number(
+      event.payload?.scoreRevision || event.payload?.player?.scoreRevision || 0,
+    );
 
     rememberFinished(targetPlayerId, finishedAt, finishedAt);
     applyPlayerSnapshots(event.payload);
@@ -710,6 +767,7 @@ function createSupabaseRealtimeClient({
         Math.max(0, Math.round(broadcastScore)),
         broadcastEffect,
         finishedAt,
+        scoreRevision,
       );
     }
 
@@ -740,21 +798,52 @@ function createSupabaseRealtimeClient({
     completeRoomGame({ room, players, leaderboard, endedAt, broadcast: false });
   }
 
-  function rememberScore(playerIdValue, score, effect, updatedAt = Date.now()) {
+  function rememberScore(
+    playerIdValue,
+    score,
+    effect,
+    updatedAt = Date.now(),
+    revision = 0,
+  ) {
     const normalizedScore = normalizeScoreValue(score);
     const parsedUpdatedAt = Number(updatedAt);
     const normalizedUpdatedAt = Number.isFinite(parsedUpdatedAt)
       ? parsedUpdatedAt
       : Date.now();
+    const parsedRevision = Number(revision);
+    const normalizedRevision = Number.isFinite(parsedRevision)
+      ? Math.max(0, Math.round(parsedRevision))
+      : 0;
     const previous = scoreCache.get(playerIdValue);
 
-    if (previous && previous.updatedAt > normalizedUpdatedAt) return;
+    if (!shouldAcceptScore(previous, normalizedRevision, normalizedUpdatedAt)) {
+      return;
+    }
 
     scoreCache.set(playerIdValue, {
       score: normalizedScore,
       effect: String(effect || "Normal").slice(0, 24),
       updatedAt: normalizedUpdatedAt,
+      revision: normalizedRevision,
     });
+  }
+
+  function shouldAcceptScore(previous, incomingRevision, incomingUpdatedAt) {
+    if (!previous) return true;
+
+    const previousRevision = Number(previous.revision || 0);
+    if (previousRevision || incomingRevision) {
+      if (incomingRevision < previousRevision) return false;
+      if (
+        incomingRevision === previousRevision &&
+        previous.updatedAt > incomingUpdatedAt
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    return previous.updatedAt <= incomingUpdatedAt;
   }
 
   function rememberFinished(playerIdValue, finishedAt, updatedAt = Date.now()) {
@@ -781,16 +870,24 @@ function createSupabaseRealtimeClient({
     const score = normalizeScoreValue(player.score);
     const presenceUpdatedAt =
       Number(player.scoreUpdatedAt || player.updatedAt || 0) || 0;
+    const presenceRevision = Number(player.scoreRevision || 0);
     const cached = scoreCache.get(player.id);
     let merged = { ...player, score };
 
-    if (!cached || presenceUpdatedAt >= cached.updatedAt) {
-      rememberScore(player.id, score, player.effect, presenceUpdatedAt);
+    if (shouldAcceptScore(cached, presenceRevision, presenceUpdatedAt)) {
+      rememberScore(
+        player.id,
+        score,
+        player.effect,
+        presenceUpdatedAt,
+        presenceRevision,
+      );
     } else {
       merged = {
         ...merged,
         score: cached.score,
         effect: cached.effect || player.effect,
+        scoreRevision: cached.revision || player.scoreRevision || 0,
       };
     }
 
@@ -846,7 +943,11 @@ function createSupabaseRealtimeClient({
     return true;
   }
 
-  function sendRoomBroadcast(event, payload, { queue = true } = {}) {
+  function sendRoomBroadcast(
+    event,
+    payload,
+    { queue = true, httpFallback = false } = {},
+  ) {
     if (!roomChannel) return false;
 
     if (!canPushBroadcast(roomChannel, roomSubscribed)) {
@@ -856,12 +957,25 @@ function createSupabaseRealtimeClient({
           payload,
         });
       }
+      if (httpFallback) {
+        sendRoomHttpBroadcast(event, payload);
+        return true;
+      }
       return false;
     }
 
     roomChannel
       .send({ type: "broadcast", event, payload })
       .catch((error) => console.warn("Room broadcast gagal:", error));
+    return true;
+  }
+
+  function sendRoomHttpBroadcast(event, payload) {
+    if (typeof roomChannel?.httpSend !== "function") return false;
+
+    roomChannel
+      .httpSend(event, payload, { timeout: BROADCAST_HTTP_TIMEOUT_MS })
+      .catch((error) => console.warn("Room HTTP broadcast gagal:", error));
     return true;
   }
 
@@ -948,6 +1062,7 @@ function createSupabaseRealtimeClient({
       score: overrides.score ?? playerState.score,
       effect: overrides.effect ?? playerState.effect,
       scoreUpdatedAt: overrides.scoreUpdatedAt ?? playerState.scoreUpdatedAt,
+      scoreRevision: overrides.scoreRevision ?? playerState.scoreRevision,
       finished: overrides.finished ?? playerState.finished,
       finishedAt: overrides.finishedAt ?? playerState.finishedAt,
       roomStatus: overrides.roomStatus ?? roomStatus,
@@ -1082,6 +1197,7 @@ function createSupabaseRealtimeClient({
         score: normalizeScoreValue(entry.score),
         effect: entry.effect || "Menunggu",
         scoreUpdatedAt: Number(entry.scoreUpdatedAt || entry.updatedAt || 0),
+        scoreRevision: Number(entry.scoreRevision || 0),
         finished: Boolean(entry.finished),
         finishedAt: entry.finishedAt || null,
         joinedAt,
@@ -1126,6 +1242,8 @@ function createSupabaseRealtimeClient({
         ready: player.ready,
         score: player.score,
         effect: player.effect,
+        scoreUpdatedAt: player.scoreUpdatedAt || player.updatedAt || 0,
+        scoreRevision: player.scoreRevision || 0,
         finished: Boolean(player.finished),
         finishedAt: player.finishedAt || null,
         host: player.id === host.id,
@@ -1176,6 +1294,33 @@ function createSupabaseRealtimeClient({
     }
   }
 
+  function scheduleScorePresenceSync() {
+    const elapsed = Date.now() - lastScorePresenceSyncAt;
+
+    if (elapsed >= SCORE_PRESENCE_SYNC_MS) {
+      clearScorePresenceSync();
+      lastScorePresenceSyncAt = Date.now();
+      trackRoomPresence();
+      return;
+    }
+
+    if (scorePresenceTimer) return;
+
+    scorePresenceTimer = setTimeout(() => {
+      scorePresenceTimer = null;
+      lastScorePresenceSyncAt = Date.now();
+      trackRoomPresence();
+    }, SCORE_PRESENCE_SYNC_MS - elapsed);
+  }
+
+  function clearScorePresenceSync() {
+    if (scorePresenceTimer) {
+      clearTimeout(scorePresenceTimer);
+      scorePresenceTimer = null;
+    }
+    lastScorePresenceSyncAt = 0;
+  }
+
   function startFinishAnnounce() {
     clearFinishAnnounce();
     let remainingAnnouncements = 4;
@@ -1204,14 +1349,19 @@ function createSupabaseRealtimeClient({
   function announcePlayerFinished() {
     if (!roomChannel || !currentRoomCode || !playerState.finished) return;
 
-    sendRoomBroadcast("game:finished", {
+    sendRoomBroadcast(
+      "game:finished",
+      {
         playerId,
         finishedAt: playerState.finishedAt || Date.now(),
         score: playerState.score,
         effect: playerState.effect,
+        scoreRevision: playerState.scoreRevision,
         player: getLocalPlayerSnapshot(),
         finishedPlayers: getFinishedSnapshot(),
-    });
+      },
+      { httpFallback: true },
+    );
   }
 
   function announcePlayerState(reason = "sync") {
@@ -1225,7 +1375,7 @@ function createSupabaseRealtimeClient({
         player: getLocalPlayerSnapshot(),
         finishedPlayers: getFinishedSnapshot(),
       },
-      { queue: false },
+      { queue: false, httpFallback: true },
     );
   }
 
@@ -1241,6 +1391,7 @@ function createSupabaseRealtimeClient({
       score: normalizeScoreValue(playerState.score),
       effect: playerState.effect || "Normal",
       scoreUpdatedAt: playerState.scoreUpdatedAt || Date.now(),
+      scoreRevision: playerState.scoreRevision || 0,
       finished: Boolean(playerState.finished),
       finishedAt: playerState.finishedAt || null,
       joinedAt,
@@ -1285,25 +1436,28 @@ function createSupabaseRealtimeClient({
   }
 
   function applyPlayerSnapshot(player, { allowScore }) {
-      const snapshotPlayerId = String(player?.id || player?.playerId || "");
-      if (!snapshotPlayerId) return;
+    const snapshotPlayerId = String(player?.id || player?.playerId || "");
+    if (!snapshotPlayerId) return;
 
-      const scoreUpdatedAt =
-        Number(player.scoreUpdatedAt || player.updatedAt || 0) || Date.now();
-      const snapshotScore = Number(player.score);
-      if (allowScore && Number.isFinite(snapshotScore)) {
-        rememberScore(
-          snapshotPlayerId,
-          snapshotScore,
-          player.effect || "Normal",
-          scoreUpdatedAt,
-        );
-      }
+    const scoreUpdatedAt =
+      Number(player.scoreUpdatedAt || player.updatedAt || 0) || Date.now();
+    const scoreRevision = Number(player.scoreRevision || 0);
+    const snapshotScore = Number(player.score);
+    if (allowScore && Number.isFinite(snapshotScore)) {
+      rememberScore(
+        snapshotPlayerId,
+        snapshotScore,
+        player.effect || "Normal",
+        scoreUpdatedAt,
+        scoreRevision,
+      );
+    }
 
-      if (player.finished) {
-        const finishedAt = Number(player.finishedAt || player.updatedAt || 0) || Date.now();
-        rememberFinished(snapshotPlayerId, finishedAt, finishedAt);
-      }
+    if (player.finished) {
+      const finishedAt =
+        Number(player.finishedAt || player.updatedAt || 0) || Date.now();
+      rememberFinished(snapshotPlayerId, finishedAt, finishedAt);
+    }
   }
 
   function endGame({ force = false, room: roomSnapshot = null } = {}) {
@@ -1332,6 +1486,7 @@ function createSupabaseRealtimeClient({
     clearRoomTimer();
     clearStateAnnounce();
     clearFinishAnnounce();
+    clearScorePresenceSync();
     roomStatus = "ended";
     roomEndsAt = endedAt;
     playerState.finished = true;
@@ -1344,6 +1499,7 @@ function createSupabaseRealtimeClient({
       finished: true,
       finishedAt: playerState.finishedAt,
       effect: playerState.effect,
+      scoreRevision: playerState.scoreRevision,
     });
     syncLobbyRoomStatus();
 
@@ -1364,7 +1520,11 @@ function createSupabaseRealtimeClient({
     onMessage?.({ type: "game:ended", payload: { leaderboard } });
 
     if (broadcast) {
-      sendRoomBroadcast("game:ended", { leaderboard, endsAt: endedAt });
+      sendRoomBroadcast(
+        "game:ended",
+        { leaderboard, endsAt: endedAt },
+        { httpFallback: true },
+      );
     }
   }
 

@@ -278,11 +278,14 @@ function startGame(client) {
     return;
   }
 
+  const now = Date.now();
   room.status = "playing";
-  room.endsAt = Date.now() + GAME_DURATION_MS;
+  room.endsAt = now + GAME_DURATION_MS;
 
   for (const player of room.players.values()) {
     player.score = 0;
+    player.scoreUpdatedAt = now;
+    player.scoreRevision = 0;
     player.ready = false;
     player.finished = false;
     player.finishedAt = null;
@@ -308,7 +311,10 @@ function addScore(client, points, effect) {
   if (player.finished) return;
 
   const boundedPoints = normalizeScoreDelta(points);
+  const now = Date.now();
   player.score = Math.max(0, player.score + boundedPoints);
+  player.scoreUpdatedAt = now;
+  player.scoreRevision = (player.scoreRevision || 0) + 1;
   player.effect = cleanText(effect || player.effect || "Normal").slice(0, 24);
   broadcastRoom(room);
 }
@@ -393,6 +399,8 @@ function createRoomPlayer(client, ready) {
     finished: false,
     finishedAt: null,
     score: 0,
+    scoreUpdatedAt: Date.now(),
+    scoreRevision: 0,
     effect: "Menunggu"
   };
 }
