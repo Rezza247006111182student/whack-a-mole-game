@@ -7,7 +7,25 @@ export async function moderateUsername(username) {
     return {
       allowed: false,
       source: "local",
-      reason: "Username tidak pantas. Coba nama lain."
+      reason: "Username tidak pantas. Coba nama lain.",
+    };
+  }
+
+  const moderationMode = String(
+    import.meta.env?.VITE_MODERATION_MODE || "auto",
+  ).toLowerCase();
+  const isLocalHost = ["localhost", "127.0.0.1"].includes(
+    window.location.hostname,
+  );
+  const shouldUseApi =
+    moderationMode === "api" || (moderationMode === "auto" && isLocalHost);
+
+  if (!shouldUseApi) {
+    return {
+      allowed: true,
+      source: "local",
+      skippedAi: true,
+      reason: "Moderasi AI dinonaktifkan di lingkungan ini.",
     };
   }
 
@@ -15,7 +33,7 @@ export async function moderateUsername(username) {
     const response = await fetch("/api/moderate-username", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: value })
+      body: JSON.stringify({ username: value }),
     });
 
     if (!response.ok) {
@@ -23,7 +41,7 @@ export async function moderateUsername(username) {
         allowed: true,
         source: "local",
         skippedAi: true,
-        reason: "Moderasi AI belum tersedia."
+        reason: "Moderasi AI belum tersedia.",
       };
     }
 
@@ -33,7 +51,7 @@ export async function moderateUsername(username) {
       allowed: true,
       source: "local",
       skippedAi: true,
-      reason: "Moderasi AI belum tersedia."
+      reason: "Moderasi AI belum tersedia.",
     };
   }
 }

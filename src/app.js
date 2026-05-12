@@ -141,6 +141,16 @@ function handleServerMessage(message) {
   }
 
   if (type === "room:update") {
+    if (!payload.room) {
+      state.room = null;
+      state.leaderboard = [];
+      if (state.view === VIEW.ROOM || state.view === VIEW.GAME) {
+        state.view = VIEW.LOBBY;
+      }
+      scheduleRender();
+      return;
+    }
+
     state.room = payload.room;
     state.leaderboard = payload.room.leaderboard || [];
 
