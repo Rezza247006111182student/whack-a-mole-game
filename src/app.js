@@ -186,7 +186,10 @@ function handleServerMessage(message) {
       return;
     }
 
-    state.gameplay.endsAt = payload.room.endsAt || state.gameplay.endsAt;
+    state.gameplay.endsAt = Math.max(
+      state.gameplay.endsAt,
+      payload.room.endsAt || state.gameplay.endsAt,
+    );
     updateGameHud();
     return;
   }

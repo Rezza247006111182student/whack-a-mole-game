@@ -1799,6 +1799,60 @@ textarea:focus {
   animation: hammerSwing 180ms cubic-bezier(0.2, 0.9, 0.18, 1) both;
 }
 
+.waiting-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 13;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(8, 18, 14, 0.42);
+  opacity: 0;
+  pointer-events: none;
+  backdrop-filter: blur(3px);
+  transition: opacity 180ms ease;
+}
+
+.waiting-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.waiting-card {
+  width: min(360px, 100%);
+  padding: 22px;
+  border: 3px solid #6d4727;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fff0bd, #e3b16b);
+  color: #432915;
+  text-align: center;
+  box-shadow: 0 14px 0 rgba(80, 54, 27, 0.25), 0 24px 44px rgba(0, 0, 0, 0.32);
+}
+
+.waiting-card h3 {
+  margin: 12px 0 8px;
+  font-family: "Baloo 2", "Nunito", ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.7rem;
+}
+
+.waiting-card p {
+  margin-bottom: 14px;
+  color: #6d4824;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.waiting-card strong {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: rgba(67, 41, 21, 0.12);
+  color: #3f2a18;
+}
+
 @keyframes hammerSwing {
   0% {
     transform: translate(-39px, -42px) rotate(-22deg) scale(1);

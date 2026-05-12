@@ -8,6 +8,8 @@ loadEnvFile(path.join(__dirname, ".env"));
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
 const GAME_DURATION_MS = 60_000;
+const MAX_BONUS_TIME_MS = 30_000;
+const GAME_END_GRACE_MS = 5_000;
 const MIN_SCORE_DELTA = -20;
 const MAX_SCORE_DELTA = 60;
 
@@ -159,6 +161,10 @@ function handleMessage(client, message) {
       addScore(client, message.payload?.points, message.payload?.effect || null);
       break;
 
+    case "game:finished":
+      finishPlayerGame(client);
+      break;
+
     case "game:exit":
       leaveRoom(client);
       sendRoomList(client);
@@ -241,6 +247,11 @@ function leaveRoom(client) {
     }
   }
 
+  if (room.status === "playing" && areAllPlayersFinished(room)) {
+    endGame(room.code);
+    return;
+  }
+
   broadcastRoom(room);
   broadcastRoomList();
 }
@@ -273,6 +284,8 @@ function startGame(client) {
   for (const player of room.players.values()) {
     player.score = 0;
     player.ready = false;
+    player.finished = false;
+    player.finishedAt = null;
     player.effect = "Normal";
     player.host = player.id === room.hostId;
   }
@@ -282,20 +295,39 @@ function startGame(client) {
   broadcastRoomList();
 
   clearTimeout(room.timer);
-  room.timer = setTimeout(() => endGame(room.code), GAME_DURATION_MS);
+  room.timer = setTimeout(() => endGame(room.code), GAME_DURATION_MS + MAX_BONUS_TIME_MS + GAME_END_GRACE_MS);
 }
 
 function addScore(client, points, effect) {
   const room = getClientRoom(client);
-  if (!room || room.status !== "playing" || Date.now() > room.endsAt) return;
+  if (!room || room.status !== "playing") return;
+  if (Date.now() > room.endsAt + MAX_BONUS_TIME_MS + GAME_END_GRACE_MS) return;
 
   const player = room.players.get(client.id);
   if (!player) return;
+  if (player.finished) return;
 
   const boundedPoints = normalizeScoreDelta(points);
   player.score = Math.max(0, player.score + boundedPoints);
   player.effect = cleanText(effect || player.effect || "Normal").slice(0, 24);
   broadcastRoom(room);
+}
+
+function finishPlayerGame(client) {
+  const room = getClientRoom(client);
+  if (!room || room.status !== "playing") return;
+
+  const player = room.players.get(client.id);
+  if (!player || player.finished) return;
+
+  player.finished = true;
+  player.finishedAt = Date.now();
+  player.effect = "Menunggu hasil";
+  broadcastRoom(room);
+
+  if (areAllPlayersFinished(room)) {
+    endGame(room.code);
+  }
 }
 
 function normalizeScoreDelta(value) {
@@ -305,14 +337,23 @@ function normalizeScoreDelta(value) {
   return Math.max(MIN_SCORE_DELTA, Math.min(MAX_SCORE_DELTA, Math.round(points)));
 }
 
+function areAllPlayersFinished(room) {
+  const players = [...room.players.values()];
+  return players.length > 0 && players.every((player) => player.finished);
+}
+
 function endGame(code) {
   const room = rooms.get(code);
   if (!room || room.status !== "playing") return;
 
+  clearTimeout(room.timer);
+  room.timer = null;
   room.status = "ended";
   room.endsAt = Date.now();
   for (const player of room.players.values()) {
     player.ready = false;
+    player.finished = true;
+    player.finishedAt = player.finishedAt || Date.now();
     player.effect = "Selesai";
   }
 
@@ -349,6 +390,8 @@ function createRoomPlayer(client, ready) {
     guest: client.profile.guest,
     host: false,
     ready,
+    finished: false,
+    finishedAt: null,
     score: 0,
     effect: "Menunggu"
   };

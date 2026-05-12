@@ -306,6 +306,14 @@ function gameTemplate(state) {
             <div class="mole-board" id="moleBoard" aria-label="Papan Smash Mole"></div>
           </div>
           <div class="hammer-cursor" id="hammerCursor" aria-hidden="true"></div>
+          <div class="waiting-overlay ${gameplay?.finished ? "visible" : ""}" id="waitingOverlay" aria-hidden="${gameplay?.finished ? "false" : "true"}">
+            <div class="waiting-card">
+              <span class="tag warn"><i class="fa-solid fa-hourglass-half"></i> Menunggu</span>
+              <h3>Menunggu pemain lain selesai</h3>
+              <p>Leaderboard akan tampil setelah semua pemain mengakhiri waktunya.</p>
+              <strong id="waitingCount">${players.filter((player) => player.finished).length}/${players.length || 1} pemain selesai</strong>
+            </div>
+          </div>
         </div>
 
         <aside class="side-panel">
