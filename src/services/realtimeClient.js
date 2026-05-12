@@ -179,7 +179,14 @@ function createSupabaseRealtimeClient({
     if (lobbyChannel) return;
 
     intentionalDisconnect = false;
-    supabase = createClient(supabaseUrl, supabaseAnonKey);
+    supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        storageKey: "sb-realtime-presence",
+      },
+    });
     lobbyChannel = supabase.channel(lobbyChannelName, {
       config: { presence: { key: playerId } },
     });
@@ -508,21 +515,37 @@ function createSupabaseRealtimeClient({
       const code = String(entry.roomCode || "").trim();
       if (!code) continue;
 
+      const playerIdValue = String(entry.playerId || "");
+      if (!playerIdValue) continue;
+
       const room = rooms.get(code) || {
         code,
         host: entry.username || "Host",
         hostId: entry.playerId,
         hostJoinedAt: entry.joinedAt || Date.now(),
-        players: 0,
+        players: new Map(),
         maxPlayers: MAX_ROOM_PLAYERS,
         status: entry.roomStatus || "waiting",
       };
 
-      room.players += 1;
-      if ((entry.joinedAt || 0) < (room.hostJoinedAt || 0)) {
+      const existingPlayer = room.players.get(playerIdValue);
+      const existingJoinedAt =
+        existingPlayer?.joinedAt ?? Number.POSITIVE_INFINITY;
+      const entryJoinedAt = entry.joinedAt || Date.now();
+
+      if (!existingPlayer || entryJoinedAt < existingJoinedAt) {
+        room.players.set(playerIdValue, {
+          joinedAt: entryJoinedAt,
+          username: entry.username || "Host",
+          roomStatus: entry.roomStatus || "waiting",
+          playerId: playerIdValue,
+        });
+      }
+
+      if ((entryJoinedAt || 0) < (room.hostJoinedAt || 0)) {
         room.host = entry.username || "Host";
         room.hostId = entry.playerId;
-        room.hostJoinedAt = entry.joinedAt || room.hostJoinedAt;
+        room.hostJoinedAt = entryJoinedAt || room.hostJoinedAt;
         room.status = entry.roomStatus || room.status;
       }
 
@@ -535,7 +558,7 @@ function createSupabaseRealtimeClient({
       .map((room) => ({
         code: room.code,
         host: room.host,
-        players: room.players,
+        players: room.players.size,
         maxPlayers: room.maxPlayers,
         status: room.status,
       }));
@@ -543,19 +566,34 @@ function createSupabaseRealtimeClient({
 
   function buildRoomFromPresence(entries) {
     if (!currentRoomCode) return null;
-    const players = entries.map((entry) => ({
-      id: entry.playerId,
-      username: entry.username || "Player",
-      avatar: entry.avatar || "",
-      bio: entry.bio || "",
-      guest: Boolean(entry.guest),
-      ready: Boolean(entry.ready),
-      score: Number(entry.score || 0),
-      effect: entry.effect || "Menunggu",
-      joinedAt: entry.joinedAt || Date.now(),
-      roomStatus: entry.roomStatus || "waiting",
-      roomEndsAt: entry.roomEndsAt || null,
-    }));
+    const playersMap = new Map();
+
+    for (const entry of entries) {
+      const id = String(entry.playerId || "");
+      if (!id) continue;
+
+      const joinedAt = entry.joinedAt || Date.now();
+      const existing = playersMap.get(id);
+      if (existing && (existing.joinedAt || 0) <= joinedAt) {
+        continue;
+      }
+
+      playersMap.set(id, {
+        id,
+        username: entry.username || "Player",
+        avatar: entry.avatar || "",
+        bio: entry.bio || "",
+        guest: Boolean(entry.guest),
+        ready: Boolean(entry.ready),
+        score: Number(entry.score || 0),
+        effect: entry.effect || "Menunggu",
+        joinedAt,
+        roomStatus: entry.roomStatus || "waiting",
+        roomEndsAt: entry.roomEndsAt || null,
+      });
+    }
+
+    const players = [...playersMap.values()];
 
     if (!players.length) return null;
 
