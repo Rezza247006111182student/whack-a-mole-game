@@ -449,6 +449,23 @@ function getEnv(...keys) {
   return "";
 }
 
-server.listen(PORT, () => {
-  console.log(`Whack-a-Mole realtime berjalan di http://localhost:${PORT}`);
+server.listen(PORT, "0.0.0.0", () => {
+  const os = require("os");
+  const interfaces = os.networkInterfaces();
+  const addresses = [];
+  for (const k in interfaces) {
+    for (const k2 in interfaces[k]) {
+      const address = interfaces[k][k2];
+      if (address.family === "IPv4" && !address.internal) {
+        addresses.push(address.address);
+      }
+    }
+  }
+
+  console.log(`\n🚀 Whack-a-Mole Realtime siap dimainkan!`);
+  console.log(`🏠 Lokal: http://localhost:${PORT}`);
+  addresses.forEach(ip => {
+    console.log(`🌐 Jaringan: http://${ip}:${PORT}`);
+  });
+  console.log(`\nBagikan link "Jaringan" ke temanmu yang satu Wi-Fi.\n`);
 });
