@@ -21,9 +21,9 @@ function loginTemplate(appConfig) {
     <main class="screen login-layout farm-auth">
       <section class="brand-scene farm-hero">
         <div class="brand-title farm-copy">
-          <span class="eyebrow farm-eyebrow"><i class="fa-solid fa-seedling"></i> Farm village arcade</span>
-          <h1>Whack Rush Farm</h1>
-          <p class="lead">Masuk ke kebun, pilih mode bermain, lalu kejar skor tertinggi di arena yang terasa hangat seperti game pertanian klasik.</p>
+          <span class="eyebrow farm-eyebrow"><i class="fa-solid fa-gamepad"></i> Smash Mole Arcade</span>
+          <h1>Smash Mole Saga</h1>
+          <p class="lead">Masuk ke arena, pilih mode bermain, lalu kejar skor tertinggi di medan pertempuran mole yang penuh aksi.</p>
         </div>
 
         <div class="auth-field-preview" aria-hidden="true">
@@ -37,7 +37,7 @@ function loginTemplate(appConfig) {
         <div class="farm-feature-strip" aria-label="Fitur utama">
           <div class="farm-feature"><i class="fa-solid fa-people-group"></i><small>Mode</small><strong>Solo & Room</strong></div>
           <div class="farm-feature"><i class="fa-solid fa-clock"></i><small>Musim</small><strong>60 Detik</strong></div>
-          <div class="farm-feature"><i class="fa-solid fa-trophy"></i><small>Panen</small><strong>Leaderboard</strong></div>
+          <div class="farm-feature"><i class="fa-solid fa-trophy"></i><small>Papan Skor</small><strong>Leaderboard</strong></div>
         </div>
       </section>
 
@@ -58,14 +58,14 @@ function loginTemplate(appConfig) {
 
         <div class="auth-heading">
           <h2 id="authTitle">Selamat Datang</h2>
-          <p class="muted" id="authSubtitle">Masuk sebagai pemain kebun atau lanjut sebagai guest.</p>
+          <p class="muted" id="authSubtitle">Masuk sebagai pemain atau lanjut sebagai guest.</p>
         </div>
 
         <div class="auth-panel-stage">
           <form class="form-stack auth-form active" id="loginForm">
             <label class="field">
               <span><i class="fa-solid fa-user"></i> Username / Email</span>
-              <input id="username" name="username" maxlength="80" autocomplete="username" placeholder="FarmerMole atau nama@email.com" required>
+              <input id="username" name="username" maxlength="80" autocomplete="username" placeholder="SmasherMole atau nama@email.com" required>
             </label>
             <label class="field">
               <span><i class="fa-solid fa-lock"></i> Password</span>
@@ -85,8 +85,8 @@ function loginTemplate(appConfig) {
 
           <form class="form-stack auth-form" id="registerForm">
             <label class="field">
-              <span><i class="fa-solid fa-seedling"></i> Username Petani</span>
-              <input id="registerUsername" maxlength="20" autocomplete="username" placeholder="contoh: GreenFarmer" required>
+              <span><i class="fa-solid fa-gamepad"></i> Username Pemain</span>
+              <input id="registerUsername" maxlength="20" autocomplete="username" placeholder="contoh: MoleSmash99" required>
             </label>
             <label class="field">
               <span><i class="fa-solid fa-envelope"></i> Email</span>
@@ -96,7 +96,7 @@ function loginTemplate(appConfig) {
               <span><i class="fa-solid fa-key"></i> Password</span>
               <input id="registerPassword" type="password" autocomplete="new-password" placeholder="Minimal 6 karakter">
             </label>
-            <button class="button" type="submit"><i class="fa-solid fa-seedling"></i> Buat Akun</button>
+            <button class="button" type="submit"><i class="fa-solid fa-gamepad"></i> Buat Akun</button>
             <p class="muted">Register memakai Supabase Auth. Jika email confirmation aktif, cek email sebelum login.</p>
           </form>
         </div>
@@ -110,9 +110,9 @@ function menuTemplate(state) {
     <main class="screen farm-menu">
       <header class="menu-topbar farm-menu-topbar">
         <div>
-          <span class="eyebrow farm-eyebrow"><i class="fa-solid fa-seedling"></i> Farm village arcade</span>
+          <span class="eyebrow farm-eyebrow"><i class="fa-solid fa-gamepad"></i> Smash Mole Arcade</span>
           <h2>Menu Utama</h2>
-          <p class="muted">Pilih jalur bermain, panen poin, lalu rebut papan skor kebun.</p>
+          <p class="muted">Pilih jalur bermain, kejar poin, lalu rebut papan skor tertinggi.</p>
         </div>
         <div class="actions menu-actions">
           ${profileChip(state.profile)}
@@ -125,8 +125,8 @@ function menuTemplate(state) {
 
       <section class="farm-menu-hero" aria-label="Ringkasan permainan">
         <div class="farm-menu-hero-copy">
-          <span class="tag warn">Whack Rush Farm</span>
-          <h1>Siap panen skor?</h1>
+          <span class="tag warn">Smash Mole Saga</span>
+          <h1>Siap untuk Pertempuran?</h1>
           <p>Masuk ke arena, pukul mole yang muncul, hindari jebakan, dan manfaatkan efek spesial untuk mengejar skor tertinggi.</p>
         </div>
         <div class="farm-menu-preview" aria-hidden="true">
@@ -188,9 +188,9 @@ function lobbyTemplate(state, appConfig) {
     <main class="screen farm-menu farm-lobby">
       <header class="menu-topbar farm-menu-topbar farm-lobby-topbar">
         <div>
-          <span class="eyebrow farm-eyebrow"><i class="fa-solid fa-people-group"></i> Multiplayer farm room</span>
+          <span class="eyebrow farm-eyebrow"><i class="fa-solid fa-people-group"></i> Multiplayer Saga Room</span>
           <h2>Room Tersedia</h2>
-          <p class="muted">Buat room baru atau masuk ke kebun teman lewat kode room.</p>
+          <p class="muted">Buat room baru atau masuk ke room pemain lain lewat kode room.</p>
         </div>
         <button class="button menu-back-login" id="backMenu" type="button">
           <span class="back-glyph" aria-hidden="true">&lt;</span>
@@ -290,7 +290,7 @@ function gameTemplate(state) {
       <header class="game-header">
         <div>
           <span class="eyebrow"><span class="logo-mark"></span> ${isSolo ? "Solo Match" : `Room ${state.room?.code || ""}`}</span>
-          <h2>Whack Arena</h2>
+          <h2>Smash Mole Arena</h2>
         </div>
         <button class="button danger" id="exitGame" title="Keluar dari permainan">Keluar</button>
       </header>
@@ -303,7 +303,7 @@ function gameTemplate(state) {
             <div class="stat"><small>Status Efek</small><strong id="effect">${escapeHtml(me?.effect || "Normal")}</strong></div>
           </div>
           <div class="board-wrap">
-            <div class="mole-board" id="moleBoard" aria-label="Papan whack-a-mole"></div>
+            <div class="mole-board" id="moleBoard" aria-label="Papan Smash Mole"></div>
           </div>
           <div class="hammer-cursor" id="hammerCursor" aria-hidden="true"></div>
         </div>
@@ -389,8 +389,8 @@ function settingsTemplate(state) {
     <main class="screen settings-page">
       <header class="settings-hero">
         <div>
-          <span class="eyebrow settings-eyebrow"><i class="fa-solid fa-seedling"></i> Farm profile board</span>
-          <h2>Profil Kebun</h2>
+          <span class="eyebrow settings-eyebrow"><i class="fa-solid fa-gamepad"></i> Smash Mole Profile</span>
+          <h2>Profil Pemain</h2>
           <p class="muted">Atur identitas pemain, avatar, dan catatan singkat sebelum masuk ke arena.</p>
         </div>
         <button class="button ghost settings-back" id="backMenu"><i class="fa-solid fa-arrow-left"></i> Kembali</button>
@@ -401,9 +401,9 @@ function settingsTemplate(state) {
           <div class="settings-avatar-large">
             ${largeAvatarTemplate(state.profile)}
           </div>
-          <span class="settings-status-pill"><i class="fa-solid ${state.profile.guest ? "fa-user" : "fa-leaf"}"></i> ${state.profile.guest ? "Guest Farmer" : "Farm Player"}</span>
+          <span class="settings-status-pill"><i class="fa-solid ${state.profile.guest ? "fa-user" : "fa-gamepad"}"></i> ${state.profile.guest ? "Guest Player" : "Saga Player"}</span>
           <h3>${escapeHtml(state.profile.username || "Guest")}</h3>
-          <p class="settings-bio-preview">${escapeHtml(state.profile.bio || "Belum ada bio. Tulis pesan singkat agar profil kebunmu terasa hidup.")}</p>
+          <p class="settings-bio-preview">${escapeHtml(state.profile.bio || "Belum ada bio. Tulis pesan singkat agar profil pemainmu terasa hidup.")}</p>
           <div class="settings-harvest-row">
             <span><i class="fa-solid fa-trophy"></i><strong>${Number(state.profile.totalScore || 0)}</strong><small>Total score</small></span>
             <span><i class="fa-solid fa-image"></i><strong>Avatar</strong><small>${state.profile.avatar ? "Aktif" : "Default"}</small></span>
