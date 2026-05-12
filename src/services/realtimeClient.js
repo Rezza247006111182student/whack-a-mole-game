@@ -166,6 +166,7 @@ function createSupabaseRealtimeClient({
   let roomStatus = "waiting";
   let roomEndsAt = null;
   let roomTimer = null;
+  let stateAnnounceTimer = null;
   let finishAnnounceTimer = null;
   let joinValidationTimer = null;
   let joinedAt = Date.now();
@@ -217,6 +218,7 @@ function createSupabaseRealtimeClient({
 
   function disconnect() {
     clearRoomTimer();
+    clearStateAnnounce();
     clearFinishAnnounce();
     clearJoinValidation();
     scoreCache.clear();
@@ -367,6 +369,7 @@ function createSupabaseRealtimeClient({
       .on("presence", { event: "sync" }, handleRoomSync)
       .on("broadcast", { event: "presence:refresh" }, handleRoomSync)
       .on("broadcast", { event: "game:score" }, handleRoomScoreBroadcast)
+      .on("broadcast", { event: "game:state" }, handleRoomStateBroadcast)
       .on("broadcast", { event: "game:finished" }, handleRoomFinishedBroadcast)
       .on("broadcast", { event: "game:started" }, (event) => {
         const now = Date.now();
@@ -385,6 +388,8 @@ function createSupabaseRealtimeClient({
         rememberScore(playerId, playerState.score, playerState.effect, now);
         trackRoomPresence();
         syncLobbyRoomStatus();
+        startStateAnnounce();
+        announcePlayerState("started");
         handleRoomSync();
       })
       .on("broadcast", { event: "game:ended" }, handleRoomEndedBroadcast)
@@ -415,6 +420,7 @@ function createSupabaseRealtimeClient({
 
   function leaveRoom() {
     clearRoomTimer();
+    clearStateAnnounce();
     clearFinishAnnounce();
     clearJoinValidation();
     if (roomChannel) {
@@ -493,6 +499,8 @@ function createSupabaseRealtimeClient({
     });
 
     ensureRoomTimer();
+    startStateAnnounce();
+    announcePlayerState("started");
     handleRoomSync();
   }
 
@@ -519,6 +527,7 @@ function createSupabaseRealtimeClient({
         scoreUpdatedAt: now,
       },
     });
+    announcePlayerState("score");
     emitOptimisticRoomUpdate();
   }
 
@@ -541,6 +550,7 @@ function createSupabaseRealtimeClient({
       scoreUpdatedAt: playerState.scoreUpdatedAt,
     });
     announcePlayerFinished();
+    announcePlayerState("finished");
     startFinishAnnounce();
 
     const room = buildRoomFromPresence(getRoomPresence());
@@ -655,6 +665,18 @@ function createSupabaseRealtimeClient({
     onMessage?.({ type: "room:update", payload: { room } });
   }
 
+  function handleRoomStateBroadcast(event) {
+    if (!roomChannel || !currentRoomCode) return;
+
+    applyPlayerSnapshots(event.payload);
+
+    const room = buildRoomFromPresence(getRoomPresence());
+    if (!room) return;
+
+    emitRoomUpdate(room);
+    endGameIfEveryoneFinished(room);
+  }
+
   function handleRoomFinishedBroadcast(event) {
     if (!roomChannel || !currentRoomCode) return;
 
@@ -669,7 +691,7 @@ function createSupabaseRealtimeClient({
     const broadcastEffect = String(event.payload?.effect || "Menunggu hasil").slice(0, 24);
 
     rememberFinished(targetPlayerId, finishedAt, finishedAt);
-    rememberFinishedSnapshot(event.payload?.finishedPlayers);
+    applyPlayerSnapshots(event.payload);
     if (Number.isFinite(broadcastScore)) {
       rememberScore(
         targetPlayerId,
@@ -741,20 +763,6 @@ function createSupabaseRealtimeClient({
       finishedAt: normalizedFinishedAt,
       updatedAt: normalizedUpdatedAt,
     });
-  }
-
-  function rememberFinishedSnapshot(finishedPlayers) {
-    if (!Array.isArray(finishedPlayers)) return;
-
-    for (const player of finishedPlayers) {
-      const finishedPlayerId = String(player?.id || "");
-      if (!finishedPlayerId) continue;
-      rememberFinished(
-        finishedPlayerId,
-        Number(player.finishedAt || Date.now()),
-        Number(player.finishedAt || Date.now()),
-      );
-    }
   }
 
   function mergeCachedScore(player) {
@@ -1069,6 +1077,31 @@ function createSupabaseRealtimeClient({
     }
   }
 
+  function startStateAnnounce() {
+    clearStateAnnounce();
+
+    stateAnnounceTimer = setInterval(() => {
+      if (!roomChannel || !currentRoomCode || roomStatus !== "playing") {
+        clearStateAnnounce();
+        return;
+      }
+
+      announcePlayerState("tick");
+      const room = buildRoomFromPresence(getRoomPresence());
+      if (room) {
+        emitRoomUpdate(room);
+        endGameIfEveryoneFinished(room);
+      }
+    }, 650);
+  }
+
+  function clearStateAnnounce() {
+    if (stateAnnounceTimer) {
+      clearInterval(stateAnnounceTimer);
+      stateAnnounceTimer = null;
+    }
+  }
+
   function startFinishAnnounce() {
     clearFinishAnnounce();
     let remainingAnnouncements = 4;
@@ -1105,9 +1138,46 @@ function createSupabaseRealtimeClient({
         finishedAt: playerState.finishedAt || Date.now(),
         score: playerState.score,
         effect: playerState.effect,
+        player: getLocalPlayerSnapshot(),
         finishedPlayers: getFinishedSnapshot(),
       },
     });
+  }
+
+  function announcePlayerState(reason = "sync") {
+    if (!roomChannel || !currentRoomCode || roomStatus !== "playing") return;
+
+    roomChannel.send({
+      type: "broadcast",
+      event: "game:state",
+      payload: {
+        reason,
+        sentAt: Date.now(),
+        player: getLocalPlayerSnapshot(),
+        finishedPlayers: getFinishedSnapshot(),
+      },
+    });
+  }
+
+  function getLocalPlayerSnapshot() {
+    const profile = getProfile?.() || {};
+    return {
+      id: playerId,
+      username: profile.username || "Player",
+      avatar: profile.avatar || "",
+      bio: profile.bio || "",
+      guest: Boolean(profile.guest),
+      ready: playerState.ready,
+      score: normalizeScoreValue(playerState.score),
+      effect: playerState.effect || "Normal",
+      scoreUpdatedAt: playerState.scoreUpdatedAt || Date.now(),
+      finished: Boolean(playerState.finished),
+      finishedAt: playerState.finishedAt || null,
+      joinedAt,
+      roomStatus,
+      roomEndsAt,
+      updatedAt: Date.now(),
+    };
   }
 
   function getFinishedSnapshot() {
@@ -1124,6 +1194,46 @@ function createSupabaseRealtimeClient({
     }
 
     return finishedPlayers;
+  }
+
+  function applyPlayerSnapshots(payload) {
+    if (payload?.player) {
+      applyPlayerSnapshot(payload.player, { allowScore: true });
+    }
+
+    if (Array.isArray(payload?.players)) {
+      for (const player of payload.players) {
+        applyPlayerSnapshot(player, { allowScore: false });
+      }
+    }
+
+    if (Array.isArray(payload?.finishedPlayers)) {
+      for (const player of payload.finishedPlayers) {
+        applyPlayerSnapshot({ ...player, finished: true }, { allowScore: false });
+      }
+    }
+  }
+
+  function applyPlayerSnapshot(player, { allowScore }) {
+      const snapshotPlayerId = String(player?.id || player?.playerId || "");
+      if (!snapshotPlayerId) return;
+
+      const scoreUpdatedAt =
+        Number(player.scoreUpdatedAt || player.updatedAt || 0) || Date.now();
+      const snapshotScore = Number(player.score);
+      if (allowScore && Number.isFinite(snapshotScore)) {
+        rememberScore(
+          snapshotPlayerId,
+          snapshotScore,
+          player.effect || "Normal",
+          scoreUpdatedAt,
+        );
+      }
+
+      if (player.finished) {
+        const finishedAt = Number(player.finishedAt || player.updatedAt || 0) || Date.now();
+        rememberFinished(snapshotPlayerId, finishedAt, finishedAt);
+      }
   }
 
   function endGame({ force = false, room: roomSnapshot = null } = {}) {
@@ -1150,6 +1260,7 @@ function createSupabaseRealtimeClient({
 
   function completeRoomGame({ room, players, leaderboard, endedAt, broadcast }) {
     clearRoomTimer();
+    clearStateAnnounce();
     clearFinishAnnounce();
     roomStatus = "ended";
     roomEndsAt = endedAt;
