@@ -333,6 +333,7 @@ function createSupabaseRealtimeClient({
     roomChannel
       .on("presence", { event: "sync" }, handleRoomSync)
       .on("broadcast", { event: "presence:refresh" }, handleRoomSync)
+      .on("broadcast", { event: "game:score" }, handleRoomScoreBroadcast)
       .on("broadcast", { event: "game:started" }, (event) => {
         const endsAt =
           Number(event.payload?.endsAt || 0) || Date.now() + GAME_DURATION_MS;
@@ -442,6 +443,16 @@ function createSupabaseRealtimeClient({
     playerState.score = Math.max(0, (playerState.score || 0) + boundedPoints);
     playerState.effect = String(effect || "Normal").slice(0, 24);
     trackRoomPresence();
+    roomChannel.send({
+      type: "broadcast",
+      event: "game:score",
+      payload: {
+        playerId,
+        points: boundedPoints,
+        score: playerState.score,
+        effect: playerState.effect,
+      },
+    });
     emitOptimisticRoomUpdate();
   }
 
@@ -486,6 +497,37 @@ function createSupabaseRealtimeClient({
             ready: playerState.ready,
             score: playerState.score,
             effect: playerState.effect,
+          }
+        : player,
+    );
+    room.leaderboard = getLeaderboard(room.players);
+
+    onMessage?.({ type: "room:update", payload: { room } });
+  }
+
+  function handleRoomScoreBroadcast(event) {
+    if (!roomChannel || !currentRoomCode) return;
+
+    const targetPlayerId = String(event.payload?.playerId || "");
+    if (!targetPlayerId) return;
+
+    const broadcastScore = Number(event.payload?.score ?? NaN);
+    const broadcastEffect = String(event.payload?.effect || "Normal").slice(
+      0,
+      24,
+    );
+
+    const room = buildRoomFromPresence(getRoomPresence());
+    if (!room) return;
+
+    room.players = room.players.map((player) =>
+      player.id === targetPlayerId
+        ? {
+            ...player,
+            score: Number.isFinite(broadcastScore)
+              ? Math.max(0, broadcastScore)
+              : player.score,
+            effect: broadcastEffect,
           }
         : player,
     );
