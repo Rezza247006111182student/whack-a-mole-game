@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 const DEFAULT_LOBBY_CHANNEL = "lobby";
 const MAX_ROOM_PLAYERS = 6;
 const GAME_DURATION_MS = 60_000;
-const MAX_BONUS_TIME_MS = 30_000;
+const MAX_BONUS_TIME_MS = 60_000;
 const GAME_END_GRACE_MS = 5_000;
 const MIN_SCORE_DELTA = -20;
 const MAX_SCORE_DELTA = 60;
