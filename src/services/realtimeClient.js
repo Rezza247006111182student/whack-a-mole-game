@@ -442,6 +442,7 @@ function createSupabaseRealtimeClient({
     playerState.score = Math.max(0, (playerState.score || 0) + boundedPoints);
     playerState.effect = String(effect || "Normal").slice(0, 24);
     trackRoomPresence();
+    emitOptimisticRoomUpdate();
   }
 
   function handleLobbySync() {
@@ -468,6 +469,27 @@ function createSupabaseRealtimeClient({
       const leaderboard = getLeaderboard(room.players);
       onMessage?.({ type: "game:ended", payload: { leaderboard } });
     }
+
+    onMessage?.({ type: "room:update", payload: { room } });
+  }
+
+  function emitOptimisticRoomUpdate() {
+    if (!roomChannel || !currentRoomCode) return;
+
+    const room = buildRoomFromPresence(getRoomPresence());
+    if (!room) return;
+
+    room.players = room.players.map((player) =>
+      player.id === playerId
+        ? {
+            ...player,
+            ready: playerState.ready,
+            score: playerState.score,
+            effect: playerState.effect,
+          }
+        : player,
+    );
+    room.leaderboard = getLeaderboard(room.players);
 
     onMessage?.({ type: "room:update", payload: { room } });
   }
