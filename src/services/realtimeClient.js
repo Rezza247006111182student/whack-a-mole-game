@@ -231,6 +231,7 @@ function createSupabaseRealtimeClient({
     return;
   }
 
+      updatedAt: Date.now(),
   function sendNow(type, payload = {}) {
     return send(type, payload);
   }
@@ -435,6 +436,7 @@ function createSupabaseRealtimeClient({
     if (!roomChannel) return;
     const room = buildRoomFromPresence(getRoomPresence());
     if (!room) return;
+      updatedAt: Date.now(),
 
     if (room.status === "playing") {
       ensureRoomTimer();
@@ -542,6 +544,9 @@ function createSupabaseRealtimeClient({
 
       const existingPlayer = room.players.get(playerIdValue);
       const existingJoinedAt =
+
+          const entryJoinedAt = entry.joinedAt || Date.now();
+          const entryUpdatedAt = entry.updatedAt || entryJoinedAt;
         existingPlayer?.joinedAt ?? Number.POSITIVE_INFINITY;
       const entryJoinedAt = entry.joinedAt || Date.now();
 
@@ -554,13 +559,12 @@ function createSupabaseRealtimeClient({
         });
       }
 
-      if ((entryJoinedAt || 0) < (room.hostJoinedAt || 0)) {
-        room.host = entry.username || "Host";
-        room.hostId = entry.playerId;
-        room.hostJoinedAt = entryJoinedAt || room.hostJoinedAt;
+          const existingUpdatedAt = existingPlayer?.updatedAt ?? -1;
         room.status = entry.roomStatus || room.status;
+          if (!existingPlayer || entryUpdatedAt > existingUpdatedAt) {
       }
-
+              joinedAt: entryJoinedAt,
+              updatedAt: entryUpdatedAt,
       rooms.set(code, room);
     }
 
@@ -585,8 +589,9 @@ function createSupabaseRealtimeClient({
       if (!id) continue;
 
       const joinedAt = entry.joinedAt || Date.now();
+      const updatedAt = entry.updatedAt || joinedAt;
       const existing = playersMap.get(id);
-      if (existing && (existing.joinedAt || 0) <= joinedAt) {
+      if (existing && (existing.updatedAt || 0) >= updatedAt) {
         continue;
       }
 
@@ -600,6 +605,7 @@ function createSupabaseRealtimeClient({
         score: Number(entry.score || 0),
         effect: entry.effect || "Menunggu",
         joinedAt,
+        updatedAt,
         roomStatus: entry.roomStatus || "waiting",
         roomEndsAt: entry.roomEndsAt || null,
       });
