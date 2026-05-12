@@ -459,14 +459,38 @@ export function createGameplayController({
 
   function addLocalScore(points, effect) {
     const state = getState();
+    const scoreDelta = normalizeScoreDelta(points);
+
     if (state.mode === "multiplayer") {
-      send("game:score", { points, effect });
+      applyOptimisticMultiplayerScore(scoreDelta, effect);
+      send("game:score", { points: scoreDelta, effect });
       return;
     }
 
     const me = state.soloPlayers.find((player) => player.id === (state.playerId || "solo-player")) || state.soloPlayers[0];
-    me.score = Math.max(0, me.score + points);
+    me.score = Math.max(0, normalizeScoreValue(me.score) + scoreDelta);
     me.effect = effect;
+  }
+
+  function applyOptimisticMultiplayerScore(points, effect) {
+    const state = getState();
+    const players = state.room?.players;
+    if (!Array.isArray(players)) return;
+
+    const me = players.find((player) => player.id === state.playerId);
+    if (!me) return;
+
+    me.score = Math.max(0, normalizeScoreValue(me.score) + points);
+    me.effect = effect;
+    state.leaderboard = [...players]
+      .map((player) => ({
+        id: player.id,
+        username: player.username,
+        avatar: player.avatar,
+        guest: player.guest,
+        score: normalizeScoreValue(player.score)
+      }))
+      .sort((a, b) => b.score - a.score || String(a.username).localeCompare(String(b.username)));
   }
 
   function updateSoloBots() {
@@ -495,10 +519,10 @@ export function createGameplayController({
     const scoreList = document.querySelector("#scoreList");
     const effectList = document.querySelector("#effectList");
     const leaderText = document.querySelector("#leaderText");
-    const leader = [...players].sort((a, b) => b.score - a.score)[0];
+    const leader = [...players].sort((a, b) => normalizeScoreValue(b.score) - normalizeScoreValue(a.score))[0];
 
     if (timer) timer.textContent = `${remaining}s`;
-    if (score) score.textContent = me?.score || 0;
+    if (score) score.textContent = normalizeScoreValue(me?.score);
 
     const activeEffects = [];
     const now = Date.now();
@@ -558,5 +582,19 @@ export function createGameplayController({
     if (roll > 0.76) return MOLES[2];
     if (roll > 0.64) return MOLES[3];
     return MOLES[0];
+  }
+
+  function normalizeScoreDelta(value) {
+    const points = Number(value);
+    if (!Number.isFinite(points)) return 0;
+
+    return Math.round(points);
+  }
+
+  function normalizeScoreValue(value) {
+    const score = Number(value);
+    if (!Number.isFinite(score)) return 0;
+
+    return Math.max(0, Math.round(score));
   }
 }

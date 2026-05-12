@@ -283,7 +283,7 @@ function gameTemplate(state) {
     0,
     Math.ceil(((gameplay?.endsAt || Date.now()) - Date.now()) / 1000),
   );
-  const leader = [...players].sort((a, b) => b.score - a.score)[0];
+  const leader = [...players].sort((a, b) => scoreValue(b.score) - scoreValue(a.score))[0];
 
   return `
     <main class="screen">
@@ -299,7 +299,7 @@ function gameTemplate(state) {
         <div class="arena" id="arena">
           <div class="hud">
             <div class="stat"><small>Waktu</small><strong id="timer">${remaining}s</strong></div>
-            <div class="stat"><small>Score</small><strong id="myScore">${me?.score || 0}</strong></div>
+            <div class="stat"><small>Score</small><strong id="myScore">${scoreValue(me?.score)}</strong></div>
             <div class="stat"><small>Status Efek</small><strong id="effect">${escapeHtml(me?.effect || "Normal")}</strong></div>
           </div>
           <div class="board-wrap">
@@ -332,7 +332,7 @@ function gameTemplate(state) {
           </section>
           <section class="panel padded">
             <h3>Pemimpin</h3>
-            <p class="muted" id="leaderText">${leader ? `${escapeHtml(leader.username)} sedang unggul dengan ${leader.score} poin.` : "Belum ada skor."}</p>
+            <p class="muted" id="leaderText">${leader ? `${escapeHtml(leader.username)} sedang unggul dengan ${scoreValue(leader.score)} poin.` : "Belum ada skor."}</p>
           </section>
         </aside>
       </section>
@@ -371,7 +371,7 @@ function leaderboardTemplate(state) {
                 ${avatarTemplate(player)}
                 <strong>${escapeHtml(player.username)}</strong>
               </div>
-              <span class="score-number">${player.score} pts</span>
+              <span class="score-number">${scoreValue(player.score)} pts</span>
             </div>
           `,
               )
@@ -526,14 +526,21 @@ function largeAvatarTemplate(profile) {
 
 export function scoreRows(players) {
   return [...players]
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => scoreValue(b.score) - scoreValue(a.score))
     .map(
       (player) => `
       <div class="player-row">
         <div class="player-name">${avatarTemplate(player)}<strong>${escapeHtml(player.username)}</strong></div>
-        <span class="score-number">${player.score}</span>
+        <span class="score-number">${scoreValue(player.score)}</span>
       </div>
     `,
     )
     .join("");
+}
+
+function scoreValue(value) {
+  const score = Number(value);
+  if (!Number.isFinite(score)) return 0;
+
+  return Math.max(0, Math.round(score));
 }

@@ -8,6 +8,8 @@ loadEnvFile(path.join(__dirname, ".env"));
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
 const GAME_DURATION_MS = 60_000;
+const MIN_SCORE_DELTA = -20;
+const MAX_SCORE_DELTA = 60;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -154,7 +156,7 @@ function handleMessage(client, message) {
       break;
 
     case "game:score":
-      addScore(client, Number(message.payload?.points || 0), message.payload?.effect || null);
+      addScore(client, message.payload?.points, message.payload?.effect || null);
       break;
 
     case "game:exit":
@@ -290,10 +292,17 @@ function addScore(client, points, effect) {
   const player = room.players.get(client.id);
   if (!player) return;
 
-  const boundedPoints = Math.max(-10, Math.min(20, Math.round(points)));
+  const boundedPoints = normalizeScoreDelta(points);
   player.score = Math.max(0, player.score + boundedPoints);
   player.effect = cleanText(effect || player.effect || "Normal").slice(0, 24);
   broadcastRoom(room);
+}
+
+function normalizeScoreDelta(value) {
+  const points = Number(value);
+  if (!Number.isFinite(points)) return 0;
+
+  return Math.max(MIN_SCORE_DELTA, Math.min(MAX_SCORE_DELTA, Math.round(points)));
 }
 
 function endGame(code) {
