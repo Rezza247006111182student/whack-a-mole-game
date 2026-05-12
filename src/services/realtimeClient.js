@@ -581,7 +581,6 @@ function createSupabaseRealtimeClient({
       },
       { queue: false, httpFallback: true },
     );
-    announcePlayerState("score");
     emitOptimisticRoomUpdate();
   }
 
@@ -684,6 +683,8 @@ function createSupabaseRealtimeClient({
         ready: playerState.ready,
         score: playerState.score,
         effect: playerState.effect,
+        scoreUpdatedAt: playerState.scoreUpdatedAt,
+        scoreRevision: playerState.scoreRevision,
         finished: playerState.finished,
         finishedAt: playerState.finishedAt,
       };
@@ -1375,7 +1376,7 @@ function createSupabaseRealtimeClient({
         player: getLocalPlayerSnapshot(),
         finishedPlayers: getFinishedSnapshot(),
       },
-      { queue: false, httpFallback: true },
+      { queue: false },
     );
   }
 

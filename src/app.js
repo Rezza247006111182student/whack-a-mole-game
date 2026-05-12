@@ -14,6 +14,7 @@ import { createBindings } from "./ui/bindings.js";
 import { createTemplates } from "./ui/templates.js";
 
 const app = document.querySelector("#app");
+const PLAYER_ID_STORAGE_KEY = "molePlayerId";
 
 const appConfig = resolveAppConfig();
 const templates = createTemplates({
@@ -701,15 +702,35 @@ function showToast(message) {
 }
 
 function getOrCreatePlayerId() {
-  const existing = localStorage.getItem("playerId");
+  const existing = readSessionValue(PLAYER_ID_STORAGE_KEY);
   if (existing) return existing;
 
-  const generated = `p_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
-  localStorage.setItem("playerId", generated);
+  const randomPart =
+    typeof crypto?.randomUUID === "function"
+      ? crypto.randomUUID().replaceAll("-", "")
+      : Math.random().toString(36).slice(2);
+  const generated = `p_${randomPart}_${Date.now().toString(36)}`;
+  writeSessionValue(PLAYER_ID_STORAGE_KEY, generated);
   return generated;
 }
 
 function ensurePlayerId() {
   if (state.playerId) return;
   state.playerId = getOrCreatePlayerId();
+}
+
+function readSessionValue(key) {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return "";
+  }
+}
+
+function writeSessionValue(key, value) {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    return;
+  }
 }
