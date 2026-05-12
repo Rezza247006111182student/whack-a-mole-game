@@ -4,12 +4,23 @@
   "private": true,
   "description": "Prototype game Whack-a-Mole dengan solo match dan multiplayer WebSocket.",
   "main": "server.js",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "dev:backend": "node server.js",
+    "dev:legacy": "node server.js",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
     "start": "node server.js",
-    "dev": "node server.js",
-    "build": "node --check server.js"
+    "check": "node --check server.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.75.0",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "vite": "^7.1.0"
   }
 }

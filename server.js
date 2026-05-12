@@ -18,14 +18,31 @@ const mimeTypes = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml",
-  ".ico": "image/x-icon"
+  ".ico": "image/x-icon",
+  ".mp3": "audio/mpeg"
 };
 
 const clients = new Map();
 const rooms = new Map();
 
-const server = http.createServer((req, res) => {
+const USERNAME_BAD_WORDS = [
+  "anjing",
+  "bangsat",
+  "babi",
+  "kontol",
+  "memek",
+  "ngentot",
+  "tolol",
+  "goblok"
+];
+
+const server = http.createServer(async (req, res) => {
   const urlPath = decodeURIComponent(new URL(req.url, `http://${req.headers.host}`).pathname);
+
+  if (urlPath.startsWith("/api/")) {
+    await handleApiRequest(req, res, urlPath);
+    return;
+  }
 
   if (urlPath === "/config.js") {
     const config = getPublicConfig();
@@ -411,6 +428,166 @@ function cleanText(value) {
   return String(value).replace(/[<>]/g, "").trim();
 }
 
+async function handleApiRequest(req, res, urlPath) {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, getCorsHeaders());
+    res.end();
+    return;
+  }
+
+  if (urlPath === "/api/moderate-username" && req.method === "POST") {
+    await handleModerateUsername(req, res);
+    return;
+  }
+
+  sendJson(res, 404, { error: "API route tidak ditemukan." });
+}
+
+async function handleModerateUsername(req, res) {
+  let body;
+
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    sendJson(res, 400, { allowed: false, reason: "Body JSON tidak valid." });
+    return;
+  }
+
+  const username = cleanText(body.username || "").slice(0, 40);
+  if (!username) {
+    sendJson(res, 400, { allowed: false, reason: "Username wajib diisi." });
+    return;
+  }
+
+  const localResult = moderateUsernameLocally(username);
+  if (!localResult.allowed) {
+    sendJson(res, 200, localResult);
+    return;
+  }
+
+  const apiKey = getEnv("GEMINI_API_KEY");
+  if (!apiKey) {
+    sendJson(res, 200, {
+      allowed: true,
+      source: "local",
+      skippedAi: true,
+      reason: "Gemini API key belum dikonfigurasi."
+    });
+    return;
+  }
+
+  try {
+    const aiResult = await moderateUsernameWithGemini(username, apiKey);
+    sendJson(res, 200, aiResult);
+  } catch (error) {
+    console.warn("Gemini username moderation gagal:", error.message);
+    sendJson(res, 200, {
+      allowed: true,
+      source: "local",
+      skippedAi: true,
+      reason: "Moderasi AI tidak tersedia, fallback ke filter lokal."
+    });
+  }
+}
+
+function moderateUsernameLocally(username) {
+  const value = username.trim().toLowerCase();
+  if (value.length < 2) {
+    return { allowed: false, source: "local", reason: "Username terlalu pendek." };
+  }
+
+  const blocked = USERNAME_BAD_WORDS.find((word) => value.includes(word));
+  if (blocked) {
+    return { allowed: false, source: "local", reason: "Username mengandung kata tidak pantas." };
+  }
+
+  return { allowed: true, source: "local", reason: "Username lolos filter lokal." };
+}
+
+async function moderateUsernameWithGemini(username, apiKey) {
+  const model = getEnv("GEMINI_MODEL") || "gemini-2.5-flash";
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const prompt = [
+    "Anda adalah moderator username untuk game anak/remaja berbahasa Indonesia.",
+    "Tentukan apakah username mengandung kata kasar, seksual, kebencian, pelecehan, ancaman, atau penghinaan.",
+    "Balas hanya JSON valid dengan format: {\"allowed\": boolean, \"reason\": string}.",
+    `Username: ${username}`
+  ].join("\n");
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }]
+        }
+      ],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: "application/json"
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Gemini HTTP ${response.status}: ${text.slice(0, 160)}`);
+  }
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  const parsed = JSON.parse(text);
+
+  return {
+    allowed: Boolean(parsed.allowed),
+    source: "gemini",
+    reason: String(parsed.reason || (parsed.allowed ? "Username aman." : "Username tidak pantas.")).slice(0, 180)
+  };
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+
+    req.on("data", (chunk) => {
+      raw += chunk;
+      if (raw.length > 16_384) {
+        reject(new Error("Body terlalu besar."));
+        req.destroy();
+      }
+    });
+
+    req.on("end", () => {
+      try {
+        resolve(raw ? JSON.parse(raw) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    req.on("error", reject);
+  });
+}
+
+function sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, {
+    ...getCorsHeaders(),
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store"
+  });
+  res.end(JSON.stringify(payload));
+}
+
+function getCorsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type"
+  };
+}
+
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
 
@@ -438,7 +615,9 @@ function getPublicConfig() {
     supabaseUrl: getEnv("VITE_SUPABASE_URL", "SUPABASE_URL", "SUPABASE_PROJECT_URL"),
     supabaseAnonKey: getEnv("VITE_SUPABASE_ANON_KEY", "SUPABASE_ANON_KEY"),
     authRedirectUrl: getEnv("VITE_AUTH_REDIRECT_URL", "AUTH_REDIRECT_URL") || `http://localhost:${PORT}`,
-    avatarBucket: getEnv("VITE_SUPABASE_AVATAR_BUCKET", "SUPABASE_AVATAR_BUCKET") || "avatars"
+    avatarBucket: getEnv("VITE_SUPABASE_AVATAR_BUCKET", "SUPABASE_AVATAR_BUCKET") || "avatars",
+    wsUrl: getEnv("VITE_WS_URL", "VITE_WEBSOCKET_URL", "WS_URL"),
+    realtimeMode: getEnv("VITE_REALTIME_MODE", "REALTIME_MODE") || "websocket"
   };
 }
 
@@ -448,6 +627,16 @@ function getEnv(...keys) {
   }
   return "";
 }
+
+server.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(`Port ${PORT} sudah dipakai. Tutup proses backend lama atau jalankan dengan PORT lain.`);
+    console.error(`Contoh Windows: netstat -ano | findstr ":${PORT}" lalu Stop-Process -Id <PID> -Force`);
+    process.exit(1);
+  }
+
+  throw error;
+});
 
 server.listen(PORT, () => {
   console.log(`Whack-a-Mole realtime berjalan di http://localhost:${PORT}`);

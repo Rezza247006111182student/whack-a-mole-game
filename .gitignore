@@ -1,4 +1,7 @@
 node_modules/
+dist/
+.vercel/
+logs/
 
 .env
 .env.*
@@ -6,4 +9,6 @@ node_modules/
 
 server.out.log
 server.err.log
+vite.out.log
+vite.err.log
 npm-debug.log*

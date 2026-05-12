@@ -332,12 +332,12 @@ function loginTemplate() {
         <div class="auth-panel-stage">
           <form class="form-stack auth-form active" id="loginForm">
             <label class="field">
-              <span><i class="fa-solid fa-user"></i> Username</span>
-              <input id="username" name="username" maxlength="20" autocomplete="username" placeholder="contoh: FarmerMole" required>
+              <span><i class="fa-solid fa-user"></i> Username / Email</span>
+              <input id="username" name="username" maxlength="80" autocomplete="username" placeholder="FarmerMole atau nama@email.com" required>
             </label>
             <label class="field">
               <span><i class="fa-solid fa-lock"></i> Password</span>
-              <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Prototype: boleh dikosongkan">
+              <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Kosongkan untuk mode prototype">
             </label>
             <div class="actions">
               <button class="button" type="submit"><i class="fa-solid fa-door-open"></i> Masuk</button>
@@ -365,7 +365,7 @@ function loginTemplate() {
               <input id="registerPassword" type="password" autocomplete="new-password" placeholder="Minimal 6 karakter">
             </label>
             <button class="button" type="submit"><i class="fa-solid fa-seedling"></i> Buat Akun</button>
-            <p class="muted">Untuk tahap UI, register akan membuat profile pemain lokal. Auth penuh bisa disambungkan ke Supabase Auth berikutnya.</p>
+            <p class="muted">Register memakai Supabase Auth. Jika email confirmation aktif, cek email sebelum login.</p>
           </form>
         </div>
       </section>
@@ -784,17 +784,25 @@ function bindLogin() {
   loginTab.addEventListener("click", () => setAuthMode("login"));
   registerTab.addEventListener("click", () => setAuthMode("register"));
 
-  document.querySelector("#loginForm").addEventListener("submit", (event) => {
+  document.querySelector("#loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const username = document.querySelector("#username").value;
+    const password = document.querySelector("#password").value;
+
+    if (password) {
+      await loginWithEmailPassword({ email: username, password });
+      return;
+    }
+
     login(username, false);
   });
 
-  registerForm.addEventListener("submit", (event) => {
+  registerForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const username = document.querySelector("#registerUsername").value;
-    login(username, false);
-    showToast("Akun prototype dibuat. Integrasi register Supabase bisa ditambahkan setelah schema auth final.");
+    const email = document.querySelector("#registerEmail").value;
+    const password = document.querySelector("#registerPassword").value;
+    await registerWithEmail({ username, email, password });
   });
 
   document.querySelector("#guestBtn").addEventListener("click", () => {
@@ -1013,6 +1021,86 @@ async function loginWithGoogle() {
   }
 }
 
+async function loginWithEmailPassword({ email, password }) {
+  const client = await initSupabase();
+
+  if (!client) {
+    showToast("Supabase belum siap. Cek VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY.");
+    return;
+  }
+
+  if (!email || !email.includes("@")) {
+    showToast("Masukkan email untuk login Supabase.");
+    return;
+  }
+
+  if (!password) {
+    showToast("Password belum diisi.");
+    return;
+  }
+
+  const { error } = await client.auth.signInWithPassword({
+    email: email.trim(),
+    password
+  });
+
+  if (error) {
+    showToast(error.message || "Login email gagal.");
+    return;
+  }
+
+  showToast("Login berhasil.");
+}
+
+async function registerWithEmail({ username, email, password }) {
+  const client = await initSupabase();
+
+  if (!client) {
+    showToast("Supabase belum siap. Cek VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY.");
+    return;
+  }
+
+  if (!isUsernameAllowed(username)) {
+    showToast("Username tidak pantas. Coba nama lain.");
+    return;
+  }
+
+  if (!email || !email.includes("@")) {
+    showToast("Email belum valid.");
+    return;
+  }
+
+  if (!password || password.length < 6) {
+    showToast("Password minimal 6 karakter.");
+    return;
+  }
+
+  const { data, error } = await client.auth.signUp({
+    email: email.trim(),
+    password,
+    options: {
+      emailRedirectTo: getAuthRedirectUrl(),
+      data: {
+        username: username.trim(),
+        full_name: username.trim()
+      }
+    }
+  });
+
+  if (error) {
+    showToast(error.message || "Register gagal.");
+    return;
+  }
+
+  if (data?.session) {
+    await applySupabaseSession(data.session);
+    showToast("Akun berhasil dibuat dan profil tersimpan.");
+    return;
+  }
+
+  showToast("Akun dibuat. Cek email untuk verifikasi sebelum login.");
+}
+
 async function applySupabaseSession(session) {
   if (!session?.user) return;
 
@@ -1021,7 +1109,7 @@ async function applySupabaseSession(session) {
 
   const metadata = authUser.user_metadata || {};
   const fallbackUsername = authUser.email?.split("@")[0] || "Player";
-  const username = metadata.user_name || metadata.preferred_username || metadata.full_name || metadata.name || fallbackUsername;
+  const username = metadata.username || metadata.user_name || metadata.preferred_username || metadata.full_name || metadata.name || fallbackUsername;
 
   state.profile = {
     ...state.profile,
