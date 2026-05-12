@@ -162,6 +162,8 @@ function createSupabaseRealtimeClient({
   let lobbyChannel = null;
   let roomChannel = null;
   let currentRoomCode = null;
+  let lobbySubscribed = false;
+  let roomSubscribed = false;
   let connected = false;
   let roomStatus = "waiting";
   let roomEndsAt = null;
@@ -173,6 +175,8 @@ function createSupabaseRealtimeClient({
   let presenceRevision = 0;
   let scoreCache = new Map();
   let finishedCache = new Map();
+  let pendingLobbyBroadcasts = [];
+  let pendingRoomBroadcasts = [];
   let playerState = {
     ready: false,
     score: 0,
@@ -207,9 +211,11 @@ function createSupabaseRealtimeClient({
       .on("presence", { event: "sync" }, handleLobbySync)
       .on("broadcast", { event: "presence:refresh" }, handleLobbySync)
       .subscribe((status) => {
-        if (status !== "SUBSCRIBED") return;
+        lobbySubscribed = status === "SUBSCRIBED";
+        if (!lobbySubscribed) return;
         connected = true;
         trackLobbyPresence();
+        flushLobbyBroadcasts();
         onOpen?.();
         onMessage?.({ type: "connected", payload: { playerId } });
         handleLobbySync();
@@ -221,6 +227,10 @@ function createSupabaseRealtimeClient({
     clearStateAnnounce();
     clearFinishAnnounce();
     clearJoinValidation();
+    lobbySubscribed = false;
+    roomSubscribed = false;
+    pendingLobbyBroadcasts = [];
+    pendingRoomBroadcasts = [];
     scoreCache.clear();
     finishedCache.clear();
     if (roomChannel) {
@@ -357,6 +367,8 @@ function createSupabaseRealtimeClient({
       roomChannel.unsubscribe();
       roomChannel = null;
     }
+    roomSubscribed = false;
+    pendingRoomBroadcasts = [];
 
     roomChannel = supabase.channel(`room:${code}`, {
       config: {
@@ -394,9 +406,11 @@ function createSupabaseRealtimeClient({
       })
       .on("broadcast", { event: "game:ended" }, handleRoomEndedBroadcast)
       .subscribe((status) => {
-        if (status !== "SUBSCRIBED") return;
+        roomSubscribed = status === "SUBSCRIBED";
+        if (!roomSubscribed) return;
         trackRoomPresence();
         syncLobbyRoomStatus();
+        flushRoomBroadcasts();
         handleRoomSync();
 
         if (shouldValidateMissing && !joinValidationTimer) {
@@ -427,6 +441,8 @@ function createSupabaseRealtimeClient({
       roomChannel.unsubscribe();
       roomChannel = null;
     }
+    roomSubscribed = false;
+    pendingRoomBroadcasts = [];
 
     currentRoomCode = null;
     roomStatus = "waiting";
@@ -492,11 +508,7 @@ function createSupabaseRealtimeClient({
     });
     syncLobbyRoomStatus();
 
-    roomChannel.send({
-      type: "broadcast",
-      event: "game:started",
-      payload: { endsAt: roomEndsAt },
-    });
+    sendRoomBroadcast("game:started", { endsAt: roomEndsAt });
 
     ensureRoomTimer();
     startStateAnnounce();
@@ -516,17 +528,17 @@ function createSupabaseRealtimeClient({
     playerState.scoreUpdatedAt = now;
     rememberScore(playerId, playerState.score, playerState.effect, now);
     trackRoomPresence();
-    roomChannel.send({
-      type: "broadcast",
-      event: "game:score",
-      payload: {
+    sendRoomBroadcast(
+      "game:score",
+      {
         playerId,
         points: boundedPoints,
         score: playerState.score,
         effect: playerState.effect,
         scoreUpdatedAt: now,
       },
-    });
+      { queue: false },
+    );
     announcePlayerState("score");
     emitOptimisticRoomUpdate();
   }
@@ -815,6 +827,76 @@ function createSupabaseRealtimeClient({
     return flattenPresenceState(roomChannel?.presenceState?.() || {});
   }
 
+  function sendLobbyBroadcast(event, payload, { queue = true } = {}) {
+    if (!lobbyChannel) return false;
+
+    if (!canPushBroadcast(lobbyChannel, lobbySubscribed)) {
+      if (queue) {
+        pendingLobbyBroadcasts = enqueueBroadcast(pendingLobbyBroadcasts, {
+          event,
+          payload,
+        });
+      }
+      return false;
+    }
+
+    lobbyChannel
+      .send({ type: "broadcast", event, payload })
+      .catch((error) => console.warn("Lobby broadcast gagal:", error));
+    return true;
+  }
+
+  function sendRoomBroadcast(event, payload, { queue = true } = {}) {
+    if (!roomChannel) return false;
+
+    if (!canPushBroadcast(roomChannel, roomSubscribed)) {
+      if (queue) {
+        pendingRoomBroadcasts = enqueueBroadcast(pendingRoomBroadcasts, {
+          event,
+          payload,
+        });
+      }
+      return false;
+    }
+
+    roomChannel
+      .send({ type: "broadcast", event, payload })
+      .catch((error) => console.warn("Room broadcast gagal:", error));
+    return true;
+  }
+
+  function canPushBroadcast(channel, subscribed) {
+    if (!channel || !subscribed) return false;
+
+    const canPush = channel.channelAdapter?.canPush;
+    return typeof canPush === "function" ? canPush.call(channel.channelAdapter) : true;
+  }
+
+  function enqueueBroadcast(queue, item) {
+    const nextQueue = [...queue, item];
+    return nextQueue.length > 24 ? nextQueue.slice(nextQueue.length - 24) : nextQueue;
+  }
+
+  function flushLobbyBroadcasts() {
+    if (!pendingLobbyBroadcasts.length) return;
+    const broadcasts = pendingLobbyBroadcasts;
+    pendingLobbyBroadcasts = [];
+
+    for (const broadcast of broadcasts) {
+      sendLobbyBroadcast(broadcast.event, broadcast.payload, { queue: false });
+    }
+  }
+
+  function flushRoomBroadcasts() {
+    if (!pendingRoomBroadcasts.length) return;
+    const broadcasts = pendingRoomBroadcasts;
+    pendingRoomBroadcasts = [];
+
+    for (const broadcast of broadcasts) {
+      sendRoomBroadcast(broadcast.event, broadcast.payload, { queue: false });
+    }
+  }
+
   function trackLobbyPresence(overrides = {}) {
     if (!lobbyChannel) return;
     const profile = getProfile?.() || {};
@@ -845,11 +927,7 @@ function createSupabaseRealtimeClient({
       updatedAt: Date.now(),
     };
     lobbyChannel.track(payload);
-    lobbyChannel.send({
-      type: "broadcast",
-      event: "presence:refresh",
-      payload: {},
-    });
+    sendLobbyBroadcast("presence:refresh", {}, { queue: false });
   }
 
   function syncLobbyRoomStatus() {
@@ -879,11 +957,7 @@ function createSupabaseRealtimeClient({
       updatedAt: Date.now(),
     };
     roomChannel.track(payload);
-    roomChannel.send({
-      type: "broadcast",
-      event: "presence:refresh",
-      payload: {},
-    });
+    sendRoomBroadcast("presence:refresh", {}, { queue: false });
   }
 
   function buildRoomSummaries(entries) {
@@ -1130,33 +1204,29 @@ function createSupabaseRealtimeClient({
   function announcePlayerFinished() {
     if (!roomChannel || !currentRoomCode || !playerState.finished) return;
 
-    roomChannel.send({
-      type: "broadcast",
-      event: "game:finished",
-      payload: {
+    sendRoomBroadcast("game:finished", {
         playerId,
         finishedAt: playerState.finishedAt || Date.now(),
         score: playerState.score,
         effect: playerState.effect,
         player: getLocalPlayerSnapshot(),
         finishedPlayers: getFinishedSnapshot(),
-      },
     });
   }
 
   function announcePlayerState(reason = "sync") {
     if (!roomChannel || !currentRoomCode || roomStatus !== "playing") return;
 
-    roomChannel.send({
-      type: "broadcast",
-      event: "game:state",
-      payload: {
+    sendRoomBroadcast(
+      "game:state",
+      {
         reason,
         sentAt: Date.now(),
         player: getLocalPlayerSnapshot(),
         finishedPlayers: getFinishedSnapshot(),
       },
-    });
+      { queue: false },
+    );
   }
 
   function getLocalPlayerSnapshot() {
@@ -1294,11 +1364,7 @@ function createSupabaseRealtimeClient({
     onMessage?.({ type: "game:ended", payload: { leaderboard } });
 
     if (broadcast) {
-      roomChannel.send({
-        type: "broadcast",
-        event: "game:ended",
-        payload: { leaderboard, endsAt: endedAt },
-      });
+      sendRoomBroadcast("game:ended", { leaderboard, endsAt: endedAt });
     }
   }
 
