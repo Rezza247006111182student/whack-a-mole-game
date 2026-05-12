@@ -1,18 +1,11 @@
 import "./styles.css";
-import {
-  MENU_BGM_SRC,
-  MENU_BGM_VOLUME,
-  VIEW
-} from "./core/constants.js";
+import { MENU_BGM_SRC, MENU_BGM_VOLUME, VIEW } from "./core/constants.js";
 import {
   getAuthRedirectUrl,
   getWebSocketUrl,
-  resolveAppConfig
+  resolveAppConfig,
 } from "./core/config.js";
-import {
-  cleanUsername,
-  isUsernameAllowed
-} from "./core/utils.js";
+import { cleanUsername, isUsernameAllowed } from "./core/utils.js";
 import { createGameplayController } from "./game/gameplayController.js";
 import { createRealtimeClient } from "./services/realtimeClient.js";
 import { createSupabaseAuthService } from "./services/supabaseAuth.js";
@@ -25,19 +18,19 @@ const app = document.querySelector("#app");
 const appConfig = resolveAppConfig();
 const templates = createTemplates({
   getState: () => state,
-  appConfig
+  appConfig,
 });
 
 let state = {
   view: VIEW.LOGIN,
   connected: false,
-  playerId: null,
+  playerId: getOrCreatePlayerId(),
   profile: {
     username: "",
     avatar: "",
     bio: "",
     guest: true,
-    totalScore: 0
+    totalScore: 0,
   },
   rooms: [],
   room: null,
@@ -45,7 +38,7 @@ let state = {
   soloPlayers: [],
   lastError: "",
   leaderboard: [],
-  gameplay: null
+  gameplay: null,
 };
 
 let renderQueued = false;
@@ -59,9 +52,10 @@ const gameplay = createGameplayController({
   send,
   pauseMenuBgm,
   showToast,
-  onFinalScore: saveFinalScore
+  onFinalScore: saveFinalScore,
 });
-const { startSolo, openGame, stopGameplay, drawMoles, updateGameHud } = gameplay;
+const { startSolo, openGame, stopGameplay, drawMoles, updateGameHud } =
+  gameplay;
 
 const bindings = createBindings({
   getState: () => state,
@@ -80,7 +74,7 @@ const bindings = createBindings({
   registerWithEmail,
   saveProfileSettings,
   signOutSupabase,
-  showToast
+  showToast,
 });
 
 const authService = createSupabaseAuthService(appConfig, {
@@ -92,11 +86,19 @@ const authService = createSupabaseAuthService(appConfig, {
   onSetupError: (error) => {
     console.error("Supabase gagal dimuat:", error);
     showToast("Supabase belum bisa dimuat. Cek koneksi internet atau env.");
-  }
+  },
 });
 
 const realtimeClient = createRealtimeClient({
+  mode: appConfig.realtimeMode,
   getUrl: () => getWebSocketUrl(appConfig),
+  supabaseConfig: {
+    url: appConfig.supabaseUrl,
+    anonKey: appConfig.supabaseAnonKey,
+    lobbyChannel: "lobby",
+  },
+  playerId: state.playerId,
+  getProfile: () => state.profile,
   onDisabled: () => {
     state.connected = false;
     render();
@@ -112,7 +114,7 @@ const realtimeClient = createRealtimeClient({
     }
     render();
   },
-  onMessage: handleServerMessage
+  onMessage: handleServerMessage,
 });
 
 authService.init();
@@ -181,17 +183,28 @@ function handleServerMessage(message) {
 
   if (type === "game:ended") {
     state.leaderboard = payload.leaderboard;
-    const myRank = state.leaderboard.findIndex(p => p.id === state.playerId) + 1;
-    const myResult = state.leaderboard.find((player) => player.id === state.playerId);
-    
+    const myRank =
+      state.leaderboard.findIndex((p) => p.id === state.playerId) + 1;
+    const myResult = state.leaderboard.find(
+      (player) => player.id === state.playerId,
+    );
+
     if (myRank > 0 && myRank <= 3) {
-      const victorySfx = new Audio("asset/music/Super Mario Bros. Music - Level Complete - BlittleMcNilsen.mp3");
-      victorySfx.play().catch(err => console.warn("Audio play blocked:", err));
+      const victorySfx = new Audio(
+        "asset/music/Super Mario Bros. Music - Level Complete - BlittleMcNilsen.mp3",
+      );
+      victorySfx
+        .play()
+        .catch((err) => console.warn("Audio play blocked:", err));
     } else if (myRank >= 4) {
-      const gameOverSfx = new Audio("asset/music/SUPER MARIO - game over - sound effect - Super Mario Broz..mp3");
-      gameOverSfx.play().catch(err => console.warn("Audio play blocked:", err));
+      const gameOverSfx = new Audio(
+        "asset/music/SUPER MARIO - game over - sound effect - Super Mario Broz..mp3",
+      );
+      gameOverSfx
+        .play()
+        .catch((err) => console.warn("Audio play blocked:", err));
     }
-    
+
     saveFinalScore(myResult?.score || 0);
     stopGameplay();
     state.view = VIEW.LEADERBOARD;
@@ -207,13 +220,14 @@ function handleServerMessage(message) {
 
 function render() {
   renderQueued = false;
-  app.className = state.view === VIEW.LOGIN
-    ? "app-shell auth-shell"
-    : state.view === VIEW.SETTINGS
-      ? "app-shell settings-shell"
-      : [VIEW.MENU, VIEW.LOBBY, VIEW.ROOM].includes(state.view)
-        ? "app-shell menu-shell"
-        : "app-shell";
+  app.className =
+    state.view === VIEW.LOGIN
+      ? "app-shell auth-shell"
+      : state.view === VIEW.SETTINGS
+        ? "app-shell settings-shell"
+        : [VIEW.MENU, VIEW.LOBBY, VIEW.ROOM].includes(state.view)
+          ? "app-shell menu-shell"
+          : "app-shell";
   syncMenuBgm();
 
   if (state.view === VIEW.LOGIN) {
@@ -270,7 +284,9 @@ function setState(nextState) {
 }
 
 async function loginWithGoogle() {
-  const { error } = await authService.signInWithGoogle(getAuthRedirectUrl(appConfig));
+  const { error } = await authService.signInWithGoogle(
+    getAuthRedirectUrl(appConfig),
+  );
 
   if (error) {
     showToast(error.message || "Login Google gagal.");
@@ -290,7 +306,7 @@ async function loginWithEmailPassword({ email, password }) {
 
   const { error } = await authService.signInWithPassword({
     email: email.trim(),
-    password
+    password,
   });
 
   if (error) {
@@ -307,7 +323,13 @@ async function applySupabaseSession(session) {
   const user = session.user;
   const metadata = user.user_metadata || {};
   const fallbackUsername = user.email?.split("@")[0] || "Player";
-  const username = metadata.username || metadata.user_name || metadata.preferred_username || metadata.full_name || metadata.name || fallbackUsername;
+  const username =
+    metadata.username ||
+    metadata.user_name ||
+    metadata.preferred_username ||
+    metadata.full_name ||
+    metadata.name ||
+    fallbackUsername;
   const profileResult = await authService.getProfile();
   const savedProfile = profileResult.data;
   const candidateUsername = cleanUsername(savedProfile?.username || username);
@@ -315,16 +337,25 @@ async function applySupabaseSession(session) {
   const safeUsername = moderation.allowed ? candidateUsername : "Player";
 
   if (profileResult.error) {
-    console.warn("Gagal mengambil profil Supabase:", profileResult.error.message);
+    console.warn(
+      "Gagal mengambil profil Supabase:",
+      profileResult.error.message,
+    );
   }
 
   state.profile = {
     ...state.profile,
     username: safeUsername,
-    avatar: savedProfile?.avatar_url || metadata.avatar_url || metadata.picture || state.profile.avatar,
+    avatar:
+      savedProfile?.avatar_url ||
+      metadata.avatar_url ||
+      metadata.picture ||
+      state.profile.avatar,
     bio: savedProfile?.bio || state.profile.bio || "",
     guest: false,
-    totalScore: Number(savedProfile?.total_score || state.profile.totalScore || 0)
+    totalScore: Number(
+      savedProfile?.total_score || state.profile.totalScore || 0,
+    ),
   };
 
   sendProfile();
@@ -355,7 +386,7 @@ async function registerWithEmail({ username, email, password }) {
     username: username.trim(),
     email: email.trim(),
     password,
-    redirectTo: getAuthRedirectUrl(appConfig)
+    redirectTo: getAuthRedirectUrl(appConfig),
   });
 
   if (error) {
@@ -394,7 +425,10 @@ async function saveProfileSettings({ username, avatarUrl, bio, avatarFile }) {
 
   if (avatarFile) {
     showToast("Mengunggah foto profil...");
-    const { data, error } = await authService.uploadAvatar(avatarFile, state.profile.avatar);
+    const { data, error } = await authService.uploadAvatar(
+      avatarFile,
+      state.profile.avatar,
+    );
     if (error) {
       showToast(error.message || "Upload foto profil gagal.");
       return;
@@ -406,7 +440,7 @@ async function saveProfileSettings({ username, avatarUrl, bio, avatarFile }) {
     ...state.profile,
     username: username.trim(),
     avatar: nextAvatar,
-    bio: bio.trim()
+    bio: bio.trim(),
   };
   sendProfile();
   await upsertSupabaseProfile();
@@ -436,7 +470,7 @@ async function login(username, guest) {
     ...state.profile,
     username: username.trim(),
     guest,
-    totalScore: guest ? 0 : state.profile.totalScore
+    totalScore: guest ? 0 : state.profile.totalScore,
   };
 
   sendProfile();
@@ -528,6 +562,7 @@ function sendProfile() {
 }
 
 function connectRealtime() {
+  ensurePlayerId();
   realtimeClient.connect();
 }
 
@@ -542,4 +577,18 @@ function showToast(message) {
   toast.textContent = message;
   document.body.append(toast);
   setTimeout(() => toast.remove(), 2600);
+}
+
+function getOrCreatePlayerId() {
+  const existing = localStorage.getItem("playerId");
+  if (existing) return existing;
+
+  const generated = `p_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+  localStorage.setItem("playerId", generated);
+  return generated;
+}
+
+function ensurePlayerId() {
+  if (state.playerId) return;
+  state.playerId = getOrCreatePlayerId();
 }
