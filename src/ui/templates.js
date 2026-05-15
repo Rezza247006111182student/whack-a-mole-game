@@ -305,6 +305,14 @@ function gameTemplate(state) {
           <div class="board-wrap">
             <div class="mole-board" id="moleBoard" aria-label="Papan whack-a-mole"></div>
           </div>
+          <div class="waiting-overlay" id="waitingOverlay" aria-hidden="true">
+            <div class="waiting-card">
+              <span class="tag warn">Menunggu</span>
+              <h3>Pemain lain masih bermain</h3>
+              <p class="muted">Skor akhir akan tampil setelah semua pemain selesai.</p>
+              <strong id="waitingCount">${players.filter((player) => player.finished).length}/${players.length || 1} pemain selesai</strong>
+            </div>
+          </div>
           <div class="hammer-cursor" id="hammerCursor" aria-hidden="true"></div>
         </div>
 

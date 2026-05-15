@@ -65,6 +65,7 @@ export function createGameplayController({
       renderTimer: null,
       redMoleTimeout: null,
       totalBonusTime: 0,
+      finished: false,
       doubleScoreUntil: 0,
       slowCursorUntil: 0,
       goldHits: [],
@@ -214,6 +215,11 @@ export function createGameplayController({
 
   function finishLocalGame() {
     const state = getState();
+    if (state.mode === "multiplayer") {
+      finishMultiplayerPlayer();
+      return;
+    }
+
     if (state.mode === "solo") {
       state.leaderboard = [...state.soloPlayers].sort((a, b) => b.score - a.score);
 
@@ -234,9 +240,48 @@ export function createGameplayController({
     }
   }
 
+  function finishMultiplayerPlayer() {
+    const state = getState();
+    if (!state.gameplay || state.gameplay.finished) return;
+
+    state.gameplay.finished = true;
+
+    for (const mole of state.gameplay.holes) {
+      if (mole?.timeoutId) {
+        clearTimeout(mole.timeoutId);
+      }
+      if (mole?.removeTimeoutId) {
+        clearTimeout(mole.removeTimeoutId);
+      }
+    }
+
+    clearInterval(state.gameplay.nextSpawn);
+    clearInterval(state.gameplay.botTimer);
+    clearTimeout(state.gameplay.timer);
+    if (state.gameplay.redMoleTimeout) {
+      clearTimeout(state.gameplay.redMoleTimeout);
+      state.gameplay.redMoleTimeout = null;
+    }
+
+    state.gameplay.holes = state.gameplay.holes.map(() => null);
+
+    const me = state.room?.players?.find((player) => player.id === state.playerId);
+    if (me) {
+      me.finished = true;
+      me.finishedAt = Date.now();
+      me.effect = "Menunggu hasil";
+    }
+
+    send("game:finished", { score: me?.score || 0 });
+    showToast("Waktu habis. Menunggu pemain lain selesai...");
+    drawMoles();
+    updateGameHud();
+  }
+
   function spawnMoles(count = 1, excludedIndexes = []) {
     const state = getState();
     if (!state.gameplay || state.view !== VIEW.GAME) return;
+    if (state.gameplay.finished) return;
     if (Date.now() >= state.gameplay.endsAt) return;
 
     const excluded = new Set(excludedIndexes);
@@ -376,6 +421,7 @@ export function createGameplayController({
     const hole = event.currentTarget;
     const index = Number(hole.dataset.hole);
     const mole = state.gameplay?.holes[index];
+    if (state.gameplay?.finished) return;
     if (!mole || mole.phase !== "active") return;
 
     const hitSfx = new Audio("asset/music/Sword_Armor_Tool Break (Minecraft Sound) - Sound Effect for editing - Sound Library.mp3");
@@ -495,6 +541,8 @@ export function createGameplayController({
     const scoreList = document.querySelector("#scoreList");
     const effectList = document.querySelector("#effectList");
     const leaderText = document.querySelector("#leaderText");
+    const waitingOverlay = document.querySelector("#waitingOverlay");
+    const waitingCount = document.querySelector("#waitingCount");
     const leader = [...players].sort((a, b) => b.score - a.score)[0];
 
     if (timer) timer.textContent = `${remaining}s`;
@@ -534,6 +582,16 @@ export function createGameplayController({
       leaderText.textContent = leader
         ? `${leader.username} sedang unggul dengan ${leader.score} poin.`
         : "Belum ada skor.";
+    }
+
+    if (waitingOverlay) {
+      const isWaiting = state.mode === "multiplayer" && Boolean(state.gameplay.finished);
+      const finishedCount = players.filter((player) => player.finished).length;
+      waitingOverlay.classList.toggle("visible", isWaiting);
+      waitingOverlay.setAttribute("aria-hidden", isWaiting ? "false" : "true");
+      if (waitingCount) {
+        waitingCount.textContent = `${finishedCount}/${players.length || 1} pemain selesai`;
+      }
     }
   }
 

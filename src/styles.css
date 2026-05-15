@@ -1536,6 +1536,47 @@ textarea:focus {
   opacity: 0.38;
 }
 
+.waiting-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(9, 38, 24, 0.46);
+  backdrop-filter: blur(3px);
+}
+
+.waiting-overlay.visible {
+  display: flex;
+}
+
+.waiting-card {
+  width: min(360px, 100%);
+  padding: 20px;
+  border-radius: 8px;
+  text-align: center;
+  background: rgba(255, 248, 224, 0.96);
+  border: 2px solid rgba(95, 62, 32, 0.18);
+  box-shadow: 0 18px 44px rgba(18, 52, 31, 0.22);
+}
+
+.waiting-card h3 {
+  margin: 10px 0 6px;
+  color: #2f4d2c;
+}
+
+.waiting-card .muted {
+  color: #6b6a4d;
+}
+
+.waiting-card strong {
+  display: block;
+  margin-top: 12px;
+  color: #3e6b31;
+}
+
 .hud {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
