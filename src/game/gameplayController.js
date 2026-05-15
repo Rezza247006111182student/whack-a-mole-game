@@ -1,8 +1,10 @@
 import {
   MAX_ACTIVE_MOLES,
+  MAX_RED_MOLE_BONUS_MS,
   MOLES,
   MOLE_STAY_MAX_MS,
   MOLE_STAY_MIN_MS,
+  RED_MOLE_BONUS_MS,
   VIEW
 } from "../core/constants.js";
 import { escapeHtml, randomInt } from "../core/utils.js";
@@ -63,7 +65,6 @@ export function createGameplayController({
       timer: null,
       botTimer: null,
       renderTimer: null,
-      redMoleTimeout: null,
       totalBonusTime: 0,
       finished: false,
       doubleScoreUntil: 0,
@@ -196,10 +197,6 @@ export function createGameplayController({
     clearInterval(state.gameplay.botTimer);
     clearInterval(state.gameplay.renderTimer);
     clearTimeout(state.gameplay.timer);
-    if (state.gameplay.redMoleTimeout) {
-      clearTimeout(state.gameplay.redMoleTimeout);
-    }
-
     if (state.gameplay.audio) {
       state.gameplay.audio.pause();
       state.gameplay.audio = null;
@@ -258,11 +255,6 @@ export function createGameplayController({
     clearInterval(state.gameplay.nextSpawn);
     clearInterval(state.gameplay.botTimer);
     clearTimeout(state.gameplay.timer);
-    if (state.gameplay.redMoleTimeout) {
-      clearTimeout(state.gameplay.redMoleTimeout);
-      state.gameplay.redMoleTimeout = null;
-    }
-
     state.gameplay.holes = state.gameplay.holes.map(() => null);
 
     const me = state.room?.players?.find((player) => player.id === state.playerId);
@@ -440,6 +432,7 @@ export function createGameplayController({
     if (!state.gameplay) return basePoints;
 
     let points = basePoints;
+    let popupText = null;
 
     if (Date.now() < state.gameplay.doubleScoreUntil) {
       points *= 2;
@@ -472,35 +465,26 @@ export function createGameplayController({
     }
 
     if (type === "bad") {
-      if (state.gameplay.redMoleTimeout) {
-        clearTimeout(state.gameplay.redMoleTimeout);
-        state.gameplay.redMoleTimeout = null;
+      const remainingBonus = Math.max(0, MAX_RED_MOLE_BONUS_MS - state.gameplay.totalBonusTime);
+      const bonusTime = Math.min(RED_MOLE_BONUS_MS, remainingBonus);
 
-        if (state.gameplay.totalBonusTime < 30000) {
-          state.gameplay.endsAt += 10000;
-          state.gameplay.totalBonusTime += 10000;
-          showToast("COMBO MERAH! +10 detik");
+      points = 0;
+      if (bonusTime > 0) {
+        state.gameplay.endsAt += bonusTime;
+        state.gameplay.totalBonusTime += bonusTime;
+        popupText = `+${Math.round(bonusTime / 1000)}s`;
+        showToast(`TIKUS MERAH! +${Math.round(bonusTime / 1000)} detik`);
 
-          clearTimeout(state.gameplay.timer);
-          state.gameplay.timer = setTimeout(finishLocalGame, Math.max(0, state.gameplay.endsAt - Date.now()));
-        } else {
-          showToast("Jatah buff dari tikus merah sudah habis");
-        }
+        clearTimeout(state.gameplay.timer);
+        state.gameplay.timer = setTimeout(finishLocalGame, Math.max(0, state.gameplay.endsAt - Date.now()));
       } else {
-        showToast("WASPADA! Pukul lagi dalam 3 detik atau -10 detik");
-        state.gameplay.redMoleTimeout = setTimeout(() => {
-          state.gameplay.redMoleTimeout = null;
-          state.gameplay.endsAt -= 10000;
-          showToast("WAKTU BERKURANG -10 detik");
-
-          clearTimeout(state.gameplay.timer);
-          state.gameplay.timer = setTimeout(finishLocalGame, Math.max(0, state.gameplay.endsAt - Date.now()));
-        }, 3000);
+        popupText = "MAX";
+        showToast("Bonus waktu tikus merah sudah maksimal");
       }
     }
 
     addLocalScore(points, MOLES.find((mole) => mole.type === type)?.effect || "Normal");
-    return points;
+    return popupText ?? points;
   }
 
   function addLocalScore(points, effect) {
@@ -561,8 +545,8 @@ export function createGameplayController({
       activeEffects.push(`<span class="tag danger"><i class="fa-solid fa-snowflake" style="margin-right: 4px;"></i> ${seconds}s</span>`);
     }
 
-    if (state.gameplay.redMoleTimeout) {
-      activeEffects.push(`<span class="tag"><i class="fa-solid fa-fire" style="margin-right: 4px;"></i> COMBO!</span>`);
+    if (state.gameplay.totalBonusTime > 0) {
+      activeEffects.push(`<span class="tag"><i class="fa-solid fa-clock" style="margin-right: 4px;"></i> +${Math.round(state.gameplay.totalBonusTime / 1000)}s</span>`);
     }
 
     if (effect) {

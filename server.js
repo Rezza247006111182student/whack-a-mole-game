@@ -8,7 +8,7 @@ loadEnvFile(path.join(__dirname, ".env"));
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
 const GAME_DURATION_MS = 60_000;
-const MAX_BONUS_TIME_MS = 30_000;
+const MAX_BONUS_TIME_MS = 60_000;
 const GAME_END_GRACE_MS = 5_000;
 
 const mimeTypes = {
