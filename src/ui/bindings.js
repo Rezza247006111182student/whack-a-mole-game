@@ -16,6 +16,7 @@ export function createBindings({
   loginWithEmailPassword,
   registerWithEmail,
   saveProfileSettings,
+  openSettings,
   signOutSupabase,
   showToast
 }) {
@@ -97,9 +98,8 @@ export function createBindings({
       render();
     });
 
-    document.querySelector('[data-view="settings"]').addEventListener("click", () => {
-      getState().view = VIEW.SETTINGS;
-      render();
+    document.querySelector('[data-view="settings"]').addEventListener("click", async () => {
+      await openSettings();
     });
   }
 

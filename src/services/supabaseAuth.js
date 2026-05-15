@@ -147,7 +147,6 @@ export function createSupabaseAuthService(config, callbacks = {}) {
         username: profile.username,
         avatar_url: profile.avatar,
         bio: profile.bio || "",
-        total_score: Number(profile.totalScore || 0),
         updated_at: new Date().toISOString()
       }, {
         onConflict: "id"

@@ -73,6 +73,7 @@ const bindings = createBindings({
   loginWithEmailPassword,
   registerWithEmail,
   saveProfileSettings,
+  openSettings,
   signOutSupabase,
   showToast,
 });
@@ -430,6 +431,12 @@ async function signOutSupabase() {
   }
 }
 
+async function openSettings() {
+  await refreshProfileFromSupabase();
+  state.view = VIEW.SETTINGS;
+  render();
+}
+
 async function saveProfileSettings({ username, avatarUrl, bio, avatarFile }) {
   const allowed = await ensureUsernameAllowed(username);
   if (!allowed) return;
@@ -472,7 +479,28 @@ async function saveFinalScore(score) {
 
   if (data?.totalScore !== undefined) {
     state.profile.totalScore = Number(data.totalScore || 0);
+    render();
   }
+}
+
+async function refreshProfileFromSupabase() {
+  if (state.profile.guest) return;
+
+  const { data, error } = await authService.getProfile();
+  if (error) {
+    console.warn("Gagal refresh profile Supabase:", error.message);
+    return;
+  }
+
+  if (!data) return;
+
+  state.profile = {
+    ...state.profile,
+    username: data.username || state.profile.username,
+    avatar: data.avatar_url || state.profile.avatar,
+    bio: data.bio || "",
+    totalScore: Number(data.total_score || 0),
+  };
 }
 
 async function login(username, guest) {
