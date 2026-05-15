@@ -585,13 +585,28 @@ async function moderateUsernameWithGemini(username, apiKey) {
 
   const data = await response.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  const parsed = JSON.parse(text);
+  const parsed = parseGeminiModerationJson(text);
 
   return {
     allowed: Boolean(parsed.allowed),
     source: "gemini",
     reason: String(parsed.reason || (parsed.allowed ? "Username aman." : "Username tidak pantas.")).slice(0, 180)
   };
+}
+
+function parseGeminiModerationJson(text) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    throw new Error("Gemini tidak mengembalikan JSON.");
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("Format JSON Gemini tidak valid.");
+    return JSON.parse(match[0]);
+  }
 }
 
 function readJsonBody(req) {
@@ -663,6 +678,7 @@ function getPublicConfig() {
     supabaseAnonKey: getEnv("VITE_SUPABASE_ANON_KEY", "SUPABASE_ANON_KEY"),
     authRedirectUrl: getEnv("VITE_AUTH_REDIRECT_URL", "AUTH_REDIRECT_URL") || `http://localhost:${PORT}`,
     avatarBucket: getEnv("VITE_SUPABASE_AVATAR_BUCKET", "SUPABASE_AVATAR_BUCKET") || "avatars",
+    apiBaseUrl: getEnv("VITE_API_BASE_URL", "API_BASE_URL"),
     wsUrl: getEnv("VITE_WS_URL", "VITE_WEBSOCKET_URL", "WS_URL"),
     realtimeMode: getEnv("VITE_REALTIME_MODE", "REALTIME_MODE") || "websocket"
   };

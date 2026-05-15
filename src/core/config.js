@@ -19,6 +19,9 @@ export function resolveAppConfig() {
     avatarBucket: sanitizeConfigValue(
       getFirstConfigValue(windowConfig.avatarBucket, viteEnv.VITE_SUPABASE_AVATAR_BUCKET)
     ) || "avatars",
+    apiBaseUrl: sanitizeConfigValue(
+      getFirstConfigValue(windowConfig.apiBaseUrl, viteEnv.VITE_API_BASE_URL)
+    ),
     wsUrl: sanitizeConfigValue(
       getFirstConfigValue(windowConfig.wsUrl, viteEnv.VITE_WS_URL, viteEnv.VITE_WEBSOCKET_URL)
     ),

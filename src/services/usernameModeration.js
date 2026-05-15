@@ -1,5 +1,7 @@
 import { isUsernameAllowed } from "../core/utils.js";
 
+const MODERATION_TIMEOUT_MS = 4_500;
+
 export async function moderateUsername(username) {
   const value = String(username || "").trim();
 
@@ -17,8 +19,10 @@ export async function moderateUsername(username) {
   const isLocalHost = ["localhost", "127.0.0.1"].includes(
     window.location.hostname,
   );
+  const apiBaseUrl = getModerationApiBaseUrl();
   const shouldUseApi =
-    moderationMode === "api" || (moderationMode === "auto" && isLocalHost);
+    moderationMode === "api" ||
+    (moderationMode === "auto" && (isLocalHost || apiBaseUrl));
 
   if (!shouldUseApi) {
     return {
@@ -29,11 +33,16 @@ export async function moderateUsername(username) {
     };
   }
 
+  const endpoint = `${apiBaseUrl}/api/moderate-username`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), MODERATION_TIMEOUT_MS);
+
   try {
-    const response = await fetch("/api/moderate-username", {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: value }),
+      signal: controller.signal,
     });
 
     if (!response.ok) {
@@ -45,7 +54,8 @@ export async function moderateUsername(username) {
       };
     }
 
-    return response.json();
+    const result = await response.json();
+    return normalizeModerationResult(result);
   } catch {
     return {
       allowed: true,
@@ -53,5 +63,35 @@ export async function moderateUsername(username) {
       skippedAi: true,
       reason: "Moderasi AI belum tersedia.",
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
+}
+
+function getModerationApiBaseUrl() {
+  const windowConfig = window.APP_CONFIG || {};
+  const env = import.meta.env || {};
+  const value = String(
+    windowConfig.apiBaseUrl ||
+      env.VITE_API_BASE_URL ||
+      (["localhost", "127.0.0.1"].includes(window.location.hostname)
+        ? env.VITE_LOCAL_BACKEND_URL
+        : "") ||
+      "",
+  ).trim();
+
+  if (!value) return "";
+  return value.replace(/\/+$/, "");
+}
+
+function normalizeModerationResult(result) {
+  return {
+    allowed: Boolean(result?.allowed),
+    source: String(result?.source || "api").slice(0, 24),
+    skippedAi: Boolean(result?.skippedAi),
+    reason: String(
+      result?.reason ||
+        (result?.allowed ? "Username aman." : "Username tidak pantas."),
+    ).slice(0, 180),
+  };
 }
