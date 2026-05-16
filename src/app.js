@@ -5,7 +5,7 @@ import {
   getWebSocketUrl,
   resolveAppConfig,
 } from "./core/config.js";
-import { cleanUsername, isUsernameAllowed } from "./core/utils.js";
+import { cleanUsername } from "./core/utils.js";
 import { createGameplayController } from "./game/gameplayController.js";
 import { createRealtimeClient } from "./services/realtimeClient.js";
 import { createSupabaseAuthService } from "./services/supabaseAuth.js";
@@ -347,8 +347,6 @@ async function applySupabaseSession(session) {
   const profileResult = await authService.getProfile();
   const savedProfile = profileResult.data;
   const candidateUsername = cleanUsername(savedProfile?.username || username);
-  const moderation = await moderateUsername(candidateUsername);
-  const safeUsername = moderation.allowed ? candidateUsername : "Player";
 
   if (profileResult.error) {
     console.warn(
@@ -359,7 +357,7 @@ async function applySupabaseSession(session) {
 
   state.profile = {
     ...state.profile,
-    username: safeUsername,
+    username: candidateUsername,
     avatar:
       savedProfile?.avatar_url ||
       metadata.avatar_url ||
@@ -520,8 +518,8 @@ async function login(username, guest) {
 }
 
 async function ensureUsernameAllowed(username) {
-  if (!isUsernameAllowed(username)) {
-    showToast("Username tidak pantas. Coba nama lain.");
+  if (String(username || "").trim().length < 2) {
+    showToast("Username terlalu pendek.");
     return false;
   }
 

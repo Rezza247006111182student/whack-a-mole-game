@@ -26,17 +26,21 @@ const mimeTypes = {
 
 const clients = new Map();
 const rooms = new Map();
+const usernameModerationCache = new Map();
 
-const USERNAME_BAD_WORDS = [
-  "anjing",
-  "bangsat",
-  "babi",
-  "kontol",
-  "memek",
-  "ngentot",
-  "tolol",
-  "goblok"
-];
+const USERNAME_MODERATION_CACHE_TTL_MS = parsePositiveInteger(
+  process.env.USERNAME_MODERATION_CACHE_TTL_MS,
+  10 * 60_000
+);
+const USERNAME_MODERATION_CACHE_MAX_SIZE = 500;
+const GEMINI_REQUEST_TIMEOUT_MS = parsePositiveInteger(process.env.GEMINI_REQUEST_TIMEOUT_MS, 10_000);
+const GEMINI_UNAVAILABLE_COOLDOWN_MS = parsePositiveInteger(
+  process.env.GEMINI_UNAVAILABLE_COOLDOWN_MS,
+  45_000
+);
+const GEMINI_RETRY_DELAYS_MS = [600, 1_400];
+let geminiUnavailableUntil = 0;
+let geminiUnavailableReason = "";
 
 const server = http.createServer(async (req, res) => {
   const urlPath = decodeURIComponent(new URL(req.url, `http://${req.headers.host}`).pathname);
@@ -506,53 +510,100 @@ async function handleModerateUsername(req, res) {
     return;
   }
 
-  const localResult = moderateUsernameLocally(username);
-  if (!localResult.allowed) {
-    sendJson(res, 200, localResult);
+  if (username.length < 2) {
+    sendJson(res, 200, { allowed: false, source: "format", reason: "Username terlalu pendek." });
     return;
   }
 
   const apiKey = getEnv("GEMINI_API_KEY");
   if (!apiKey) {
     sendJson(res, 200, {
-      allowed: true,
-      source: "local",
+      allowed: false,
+      source: "ai-unavailable",
       skippedAi: true,
-      reason: "Gemini API key belum dikonfigurasi."
+      unavailable: true,
+      reason: "Moderasi AI belum dikonfigurasi. Username belum bisa diubah."
+    });
+    return;
+  }
+
+  const cachedResult = getCachedUsernameModeration(username);
+  if (cachedResult) {
+    sendJson(res, 200, cachedResult);
+    return;
+  }
+
+  if (Date.now() < geminiUnavailableUntil) {
+    sendJson(res, 200, {
+      allowed: false,
+      source: "ai-unavailable",
+      skippedAi: true,
+      unavailable: true,
+      reason: geminiUnavailableReason || "Gemini sedang padat. Username belum bisa diubah sementara."
     });
     return;
   }
 
   try {
     const aiResult = await moderateUsernameWithGemini(username, apiKey);
+    setCachedUsernameModeration(username, aiResult);
     sendJson(res, 200, aiResult);
   } catch (error) {
     console.warn("Gemini username moderation gagal:", error.message);
+    if (isRetryableGeminiError(error)) {
+      markGeminiTemporarilyUnavailable(error);
+    }
     sendJson(res, 200, {
-      allowed: true,
-      source: "local",
+      allowed: false,
+      source: "ai-unavailable",
       skippedAi: true,
-      reason: "Moderasi AI tidak tersedia, fallback ke filter lokal."
+      unavailable: true,
+      reason: "Moderasi AI sedang tidak tersedia. Username belum bisa diubah sementara."
     });
   }
 }
 
-function moderateUsernameLocally(username) {
-  const value = username.trim().toLowerCase();
-  if (value.length < 2) {
-    return { allowed: false, source: "local", reason: "Username terlalu pendek." };
+async function moderateUsernameWithGemini(username, apiKey) {
+  const models = getGeminiModerationModels();
+  const errors = [];
+  let lastError = null;
+
+  for (const model of models) {
+    try {
+      return await requestGeminiModerationWithRetry(username, apiKey, model);
+    } catch (error) {
+      lastError = error;
+      errors.push(`${model}: ${error.message}`);
+
+      if (!shouldTryNextGeminiModel(error)) {
+        break;
+      }
+    }
   }
 
-  const blocked = USERNAME_BAD_WORDS.find((word) => value.includes(word));
-  if (blocked) {
-    return { allowed: false, source: "local", reason: "Username mengandung kata tidak pantas." };
-  }
-
-  return { allowed: true, source: "local", reason: "Username lolos filter lokal." };
+  const error = new Error(errors.join(" | ") || "Gemini moderation gagal.");
+  error.status = lastError?.status;
+  error.retryable = lastError?.retryable || isRetryableGeminiError(lastError);
+  throw error;
 }
 
-async function moderateUsernameWithGemini(username, apiKey) {
-  const model = getEnv("GEMINI_MODEL") || "gemini-2.5-flash";
+async function requestGeminiModerationWithRetry(username, apiKey, model) {
+  for (let attempt = 0; attempt <= GEMINI_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await requestGeminiModeration(username, apiKey, model);
+    } catch (error) {
+      if (!isRetryableGeminiError(error) || attempt >= GEMINI_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+
+      await delay(GEMINI_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+
+  throw new Error("Gemini retry gagal.");
+}
+
+async function requestGeminiModeration(username, apiKey, model) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const prompt = [
     "Anda adalah moderator username untuk game anak/remaja berbahasa Indonesia.",
@@ -561,26 +612,41 @@ async function moderateUsernameWithGemini(username, apiKey) {
     `Username: ${username}`
   ].join("\n");
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }]
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GEMINI_REQUEST_TIMEOUT_MS);
+  let response;
+
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }]
+          }
+        ],
+        generationConfig: {
+          temperature: 0,
+          responseMimeType: "application/json"
         }
-      ],
-      generationConfig: {
-        temperature: 0,
-        responseMimeType: "application/json"
-      }
-    })
-  });
+      }),
+      signal: controller.signal
+    });
+  } catch (error) {
+    error.retryable = error.name === "AbortError" || error instanceof TypeError;
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Gemini HTTP ${response.status}: ${text.slice(0, 160)}`);
+    const error = new Error(`Gemini HTTP ${response.status}: ${text.slice(0, 160)}`);
+    error.status = response.status;
+    error.retryable = isRetryableGeminiStatus(response.status);
+    throw error;
   }
 
   const data = await response.json();
@@ -592,6 +658,90 @@ async function moderateUsernameWithGemini(username, apiKey) {
     source: "gemini",
     reason: String(parsed.reason || (parsed.allowed ? "Username aman." : "Username tidak pantas.")).slice(0, 180)
   };
+}
+
+function getGeminiModerationModels() {
+  const rawModels = [
+    getEnv("GEMINI_MODEL") || "gemini-2.5-flash",
+    getEnv("GEMINI_FALLBACK_MODEL"),
+    getEnv("GEMINI_FALLBACK_MODELS")
+  ].filter(Boolean);
+  const models = rawModels
+    .flatMap((value) => String(value).split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return [...new Set(models)];
+}
+
+function getCachedUsernameModeration(username) {
+  const key = getUsernameModerationCacheKey(username);
+  const cached = usernameModerationCache.get(key);
+
+  if (!cached) return null;
+
+  if (cached.expiresAt <= Date.now()) {
+    usernameModerationCache.delete(key);
+    return null;
+  }
+
+  return {
+    ...cached.result,
+    source: `${cached.result.source || "gemini"}-cache`,
+    cached: true
+  };
+}
+
+function setCachedUsernameModeration(username, result) {
+  const key = getUsernameModerationCacheKey(username);
+  usernameModerationCache.set(key, {
+    result,
+    expiresAt: Date.now() + USERNAME_MODERATION_CACHE_TTL_MS
+  });
+
+  if (usernameModerationCache.size > USERNAME_MODERATION_CACHE_MAX_SIZE) {
+    const oldestKey = usernameModerationCache.keys().next().value;
+    usernameModerationCache.delete(oldestKey);
+  }
+}
+
+function getUsernameModerationCacheKey(username) {
+  return String(username || "").trim().toLowerCase();
+}
+
+function markGeminiTemporarilyUnavailable(error) {
+  geminiUnavailableUntil = Date.now() + GEMINI_UNAVAILABLE_COOLDOWN_MS;
+  geminiUnavailableReason = getGeminiUnavailableReason(error);
+}
+
+function getGeminiUnavailableReason(error) {
+  if (error?.status === 429) {
+    return "Gemini sedang membatasi request. Username belum bisa diubah sementara.";
+  }
+
+  if (error?.status === 503) {
+    return "Gemini sedang padat. Username belum bisa diubah sementara.";
+  }
+
+  return "Gemini sementara tidak tersedia. Username belum bisa diubah sementara.";
+}
+
+function shouldTryNextGeminiModel(error) {
+  if (!error) return false;
+  return [400, 404, 429, 500, 502, 503, 504].includes(error.status) || error.retryable;
+}
+
+function isRetryableGeminiError(error) {
+  if (!error) return false;
+  return Boolean(error.retryable) || isRetryableGeminiStatus(error.status);
+}
+
+function isRetryableGeminiStatus(status) {
+  return [429, 500, 502, 503, 504].includes(Number(status));
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function parseGeminiModerationJson(text) {
@@ -669,6 +819,11 @@ function loadEnvFile(filePath) {
       process.env[key] = value;
     }
   }
+}
+
+function parsePositiveInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
 }
 
 function getPublicConfig() {

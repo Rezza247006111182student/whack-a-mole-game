@@ -1,15 +1,16 @@
-import { isUsernameAllowed } from "../core/utils.js";
-
-const MODERATION_TIMEOUT_MS = 4_500;
+const MODERATION_TIMEOUT_MS = parsePositiveInteger(
+  import.meta.env?.VITE_MODERATION_TIMEOUT_MS,
+  15_000,
+);
 
 export async function moderateUsername(username) {
   const value = String(username || "").trim();
 
-  if (!isUsernameAllowed(value)) {
+  if (value.length < 2) {
     return {
       allowed: false,
-      source: "local",
-      reason: "Username tidak pantas. Coba nama lain.",
+      source: "format",
+      reason: "Username terlalu pendek.",
     };
   }
 
@@ -26,10 +27,11 @@ export async function moderateUsername(username) {
 
   if (!shouldUseApi) {
     return {
-      allowed: true,
-      source: "local",
+      allowed: false,
+      source: "ai-unavailable",
       skippedAi: true,
-      reason: "Moderasi AI dinonaktifkan di lingkungan ini.",
+      unavailable: true,
+      reason: "Moderasi AI belum tersambung. Username belum bisa diubah.",
     };
   }
 
@@ -47,10 +49,11 @@ export async function moderateUsername(username) {
 
     if (!response.ok) {
       return {
-        allowed: true,
-        source: "local",
+        allowed: false,
+        source: "ai-unavailable",
         skippedAi: true,
-        reason: "Moderasi AI belum tersedia.",
+        unavailable: true,
+        reason: "Moderasi AI sedang tidak tersedia. Coba lagi nanti.",
       };
     }
 
@@ -58,10 +61,11 @@ export async function moderateUsername(username) {
     return normalizeModerationResult(result);
   } catch {
     return {
-      allowed: true,
-      source: "local",
+      allowed: false,
+      source: "ai-unavailable",
       skippedAi: true,
-      reason: "Moderasi AI belum tersedia.",
+      unavailable: true,
+      reason: "Moderasi AI sedang tidak tersedia. Coba lagi nanti.",
     };
   } finally {
     clearTimeout(timeoutId);
@@ -89,9 +93,15 @@ function normalizeModerationResult(result) {
     allowed: Boolean(result?.allowed),
     source: String(result?.source || "api").slice(0, 24),
     skippedAi: Boolean(result?.skippedAi),
+    unavailable: Boolean(result?.unavailable),
     reason: String(
       result?.reason ||
         (result?.allowed ? "Username aman." : "Username tidak pantas."),
     ).slice(0, 180),
   };
+}
+
+function parsePositiveInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
 }

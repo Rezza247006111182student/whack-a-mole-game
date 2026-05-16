@@ -1,5 +1,3 @@
-import { BAD_WORDS } from "./constants.js";
-
 export function cleanUsername(value) {
   const username = String(value || "")
     .replace(/[<>]/g, "")
@@ -7,12 +5,6 @@ export function cleanUsername(value) {
     .slice(0, 20);
 
   return username || "Player";
-}
-
-export function isUsernameAllowed(username) {
-  const value = username.trim().toLowerCase();
-  if (value.length < 2) return false;
-  return !BAD_WORDS.some((word) => value.includes(word));
 }
 
 export function randomInt(min, max) {

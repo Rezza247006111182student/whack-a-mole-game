@@ -23,14 +23,3 @@ export const MAX_RED_MOLE_BONUS_MS = 60_000;
 
 export const MENU_BGM_SRC = "asset/music/Lagu Menu Utama.mp3";
 export const MENU_BGM_VOLUME = 0.32;
-
-export const BAD_WORDS = [
-  "anjing",
-  "bangsat",
-  "babi",
-  "kontol",
-  "memek",
-  "ngentot",
-  "tolol",
-  "goblok"
-];
