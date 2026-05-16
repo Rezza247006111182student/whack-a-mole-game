@@ -857,5 +857,5 @@ server.on("error", (error) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Whack-a-Mole realtime berjalan di http://localhost:${PORT}`);
+  console.log(`Smash Mole Saga realtime berjalan di http://localhost:${PORT}`);
 });

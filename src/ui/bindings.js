@@ -220,7 +220,7 @@ export function createBindings({
     });
 
     document.querySelector("#contactCs").addEventListener("click", () => {
-      showToast("CS: support@whackrush.local");
+      showToast("CS: support@smashmolesaga.local");
     });
   }
 

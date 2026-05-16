@@ -290,7 +290,7 @@ function loginTemplate() {
       <section class="brand-scene farm-hero">
         <div class="brand-title farm-copy">
           <span class="eyebrow farm-eyebrow"><i class="fa-solid fa-seedling"></i> Farm village arcade</span>
-          <h1>Whack Rush Farm</h1>
+          <h1>Smash Mole Saga</h1>
           <p class="lead">Masuk ke kebun, pilih mode bermain, lalu kejar skor tertinggi di arena yang terasa hangat seperti game pertanian klasik.</p>
         </div>
 
@@ -406,7 +406,7 @@ function menuTemplate() {
 
       <section class="farm-menu-hero" aria-label="Ringkasan permainan">
         <div class="farm-menu-hero-copy">
-          <span class="tag warn">Whack Rush Farm</span>
+          <span class="tag warn">Smash Mole Saga</span>
           <h1>Siap panen skor?</h1>
           <p>Masuk ke arena, pukul mole yang muncul, hindari jebakan, dan manfaatkan efek spesial untuk mengejar skor tertinggi.</p>
         </div>
@@ -557,7 +557,7 @@ function gameTemplate() {
       <header class="game-header">
         <div>
           <span class="eyebrow"><span class="logo-mark"></span> ${isSolo ? "Solo Match" : `Room ${state.room?.code || ""}`}</span>
-          <h2>Whack Arena</h2>
+          <h2>Smash Mole Saga</h2>
         </div>
         <button class="button danger" id="exitGame" title="Keluar dari permainan">Keluar</button>
       </header>
@@ -570,7 +570,7 @@ function gameTemplate() {
             <div class="stat"><small>Status Efek</small><strong id="effect">${escapeHtml(me?.effect || "Normal")}</strong></div>
           </div>
           <div class="board-wrap">
-            <div class="mole-board" id="moleBoard" aria-label="Papan whack-a-mole"></div>
+            <div class="mole-board" id="moleBoard" aria-label="Papan Smash Mole Saga"></div>
           </div>
           <div class="hammer-cursor" id="hammerCursor" aria-hidden="true">
           </div>
@@ -997,7 +997,7 @@ function bindSettings() {
   });
 
   document.querySelector("#contactCs").addEventListener("click", () => {
-    showToast("CS: support@whackrush.local");
+    showToast("CS: support@smashmolesaga.local");
   });
 }
 

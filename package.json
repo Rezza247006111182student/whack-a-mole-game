@@ -1,8 +1,8 @@
 {
-  "name": "whack-a-mole-realtime",
+  "name": "smash-mole-saga",
   "version": "1.0.0",
   "private": true,
-  "description": "Prototype game Whack-a-Mole dengan solo match dan multiplayer WebSocket.",
+  "description": "Prototype game Smash Mole Saga dengan solo match dan multiplayer WebSocket.",
   "main": "server.js",
   "engines": {
     "node": ">=20.19.0"
